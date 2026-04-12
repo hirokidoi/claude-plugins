@@ -1,0 +1,20 @@
+[checklist-gate: {gate_name} denied]
+
+This operation requires the following ack(s) to be declared first:
+{require_list}
+
+To proceed, run: {ack_commands}
+{ack_hint}
+
+If the prerequisite is genuinely absent (e.g., the file does not exist, the user has not given an instruction), you can ack with that fact:
+{exit_commands}
+
+If you cannot articulate a concrete justification, do NOT ack — instead, ask the user for clarification or stop the operation.
+
+For user-prompt-match ack items, you MUST specify --prompt-id with the prompt_id notified by [checklist-gate: prompt_id=NN]:
+  gate-ack <item> --prompt-id <id> --reason "<justification>"
+The hook verifies that the referenced user prompt actually contains the required keywords.
+Do NOT guess or fabricate a prompt_id — use only the value from the [checklist-gate: prompt_id=NN] notification.
+If the user prompt is an affirmative response (e.g. OK, yes) to an AI question, use --affirm with a quote of the AI question:
+  gate-ack <item> --prompt-id <id> --affirm "<AI question quote>" --reason "<justification>"
+The hook checks that the --affirm value contains the required keywords and that the user prompt matches affirm_keywords.

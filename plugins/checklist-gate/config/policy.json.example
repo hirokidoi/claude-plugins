@@ -1,0 +1,58 @@
+{
+  "affirm_keywords": ["OK", "はい", "よい", "いいよ", "お願い", "yes", "sure", "うん", "おけ", "いいね"],
+  "ack_items": {
+    "docs_checked": {
+      "type": "session",
+      "min_reason_length": 20,
+      "hint": "README.md や DEVELOPMENT.md を Read で全文読んだ？存在しない場合は Glob で探したが無かったことを reason に記載して。"
+    },
+    "commit_ready": {
+      "type": "consumable",
+      "min_reason_length": 20,
+      "hint": "テスト実行した？変更内容を確認した？コミットOKな根拠を reason に記載して。"
+    },
+    "user_authorized_push": {
+      "type": "user-prompt-match",
+      "min_reason_length": 20,
+      "hint": "ユーザー発話に明示的な push 指示があった？「pushして」のような直接の依頼が無ければユーザーに確認して。",
+      "match_keywords": ["push", "プッシュ"],
+      "except_keywords": ["dry-run", "ドライラン", "pushはまだ", "pushはしないで"],
+      "max_prompt_distance": 3
+    }
+  },
+  "gates": [
+    {
+      "name": "task_start",
+      "description": "Require docs_checked before most tool operations",
+      "trigger": {
+        "type": "gate",
+        "patterns": ["Edit(*)", "Write(*)", "Read(*)", "Glob(*)", "Grep(*)"],
+        "except_patterns": ["Read(*README*)", "Read(*DEVELOPMENT*)", "Glob(*README*)", "Glob(*DEVELOPMENT*)"]
+      },
+      "require": ["docs_checked"],
+      "enabled": true
+    },
+    {
+      "name": "git_commit_gate",
+      "description": "Require commit_ready before git commit",
+      "trigger": {
+        "type": "gate",
+        "patterns": ["Bash(git commit *)"],
+        "except_patterns": []
+      },
+      "require": ["commit_ready"],
+      "enabled": true
+    },
+    {
+      "name": "git_push_gate",
+      "description": "Require user_authorized_push before git push",
+      "trigger": {
+        "type": "gate",
+        "patterns": ["Bash(git push *)"],
+        "except_patterns": ["Bash(git push --dry-run *)"]
+      },
+      "require": ["user_authorized_push"],
+      "enabled": true
+    }
+  ]
+}

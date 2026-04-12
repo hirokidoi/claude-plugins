@@ -1,0 +1,29 @@
+[checklist-gate plugin enabled]
+
+This plugin enforces explicit ack declarations before specific operations (git push, git commit, etc). 
+When blocked, follow the deny reason and run `gate-ack <item> --reason "<concrete justification>"` via Bash before retrying.
+The hook intercepts this command internally — no external binary is needed.
+
+IMPORTANT rules for gate-ack:
+- Order MUST be: attempt operation → receive gate deny → run gate-ack → retry operation. Pre-emptive ack (before being blocked) is invalid and will not work.
+- `gate-ack` is NOT a bash command. Do NOT chain it with `&&`. Always invoke it as a standalone Bash call.
+- The reason MUST be factual. Only write what actually exists in the conversation. Do NOT write inferences, guesses, or phrases like "I judged that...". Fabricating a reason to bypass the gate is a critical violation that warrants immediate termination.
+
+The reason must meet the minimum length defined per ack item and specifically articulate your justification. Examples (Japanese is fine):
+  gate-ack docs_checked --reason "README.md と DEVELOPMENT.md を Read で確認済み"
+
+For user-prompt-match ack items (e.g. user_authorized_push), you MUST specify --prompt-id:
+  gate-ack user_authorized_push --prompt-id 42 --reason "ユーザー発話『push して』を直接受信"
+The prompt_id is notified via [checklist-gate: prompt_id=NN] after each user prompt.
+The hook mechanically verifies that the referenced prompt contains the required keywords — do NOT guess or fabricate a prompt_id.
+For user_authorized_push specifically: ack is only valid when the user has explicitly said "push", "push して", "プッシュ", or equivalent. Interpreting unrelated approval as push authorization is fabrication.
+If the user prompt is an affirmative response (e.g. OK, yes) to an AI question, use --affirm with a quote of the AI question:
+  gate-ack user_authorized_push --prompt-id 42 --affirm "push しますか？" --reason "AIの質問に対しユーザーがOKと回答"
+
+Details of available gates and ack items: `gate-ack --help-gates`
+Temporarily toggle a gate on/off: `gate-toggle on <name>` / `gate-toggle off <name>`
+
+[checklist-gate data paths]
+  policy-source.md: {plugin_data_dir}/policy-source.md
+  policy.json: {plugin_data_dir}/policy.json
+These are the user-editable config files. Skills (edit-config, apply-config) should read/write these paths.
