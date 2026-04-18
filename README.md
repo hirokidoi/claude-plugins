@@ -20,6 +20,6 @@ Claude Code 内で以下を実行:
 
 各プラグインの詳細は、リンク先の README を参照してください。
 
-## ライセンス
+## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
