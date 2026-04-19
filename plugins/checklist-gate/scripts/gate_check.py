@@ -421,6 +421,18 @@ def _split_bash_commands(command: str) -> list:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _normalize_path_tokens(sub: str) -> str:
+    """Replace tokens containing '/' with their basename for flexible matching.
+
+    '/usr/bin/git -C ~/bin push' -> 'git -C bin push'
+    """
+    try:
+        tokens = shlex.split(sub)
+    except ValueError:
+        return sub
+    return ' '.join(os.path.basename(t) if '/' in t else t for t in tokens)
+
+
 def _glob_match(value: str, pattern: str) -> bool:
     """Match value against a glob pattern. Also matches if value starts with pattern prefix.
 
@@ -447,10 +459,10 @@ def _matches_tool_pattern(pattern: str, tool_name: str, tool_input: dict) -> boo
         command = tool_input.get('command', '')
         flexible_pat = pat_glob.replace(' ', '*')
         candidates = _split_bash_commands(command)
-        slash_pieces = [p.strip() for sub in candidates for p in sub.split('/') if p.strip()]
+        normalized = [_normalize_path_tokens(sub) for sub in candidates]
         return any(
             _glob_match(c, pat_glob) or _glob_match(c, flexible_pat)
-            for c in candidates + slash_pieces
+            for c in candidates + normalized
         )
     # Other tools: match against file_path, pattern, path
     for key in ('file_path', 'pattern', 'path'):
