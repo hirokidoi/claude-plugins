@@ -1,7 +1,7 @@
 {
   "name": "checklist-gate",
   "description": "Enforces explicit ack declarations before specific operations (git push, git commit, etc.) via structured deny/block hooks with SQLite-backed audit trail.",
-  "version": "1.5.0",
+  "version": "1.6.1",
   "author": {
     "name": "Hiroki Doi"
   },
