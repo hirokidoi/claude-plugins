@@ -445,7 +445,13 @@ def _matches_tool_pattern(pattern: str, tool_name: str, tool_input: dict) -> boo
     # Bash: match against each sub-command (handles chained commands like git add && git commit)
     if tool_name == 'Bash':
         command = tool_input.get('command', '')
-        return any(_glob_match(sub, pat_glob) for sub in _split_bash_commands(command))
+        flexible_pat = pat_glob.replace(' ', '*')
+        candidates = _split_bash_commands(command)
+        slash_pieces = [p.strip() for sub in candidates for p in sub.split('/') if p.strip()]
+        return any(
+            _glob_match(c, pat_glob) or _glob_match(c, flexible_pat)
+            for c in candidates + slash_pieces
+        )
     # Other tools: match against file_path, pattern, path
     for key in ('file_path', 'pattern', 'path'):
         value = tool_input.get(key)
