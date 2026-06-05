@@ -35,7 +35,13 @@ If there is a clear rule violation, output ONLY:
 
 If no violation: OK
 
-Rules: default to OK when uncertain. No general advice or speculation. Flag only clear, fact-based violations.\
+Rules: default to OK when uncertain. No general advice or speculation. Flag only clear, fact-based violations.
+
+Important context about gate-ack:
+- `gate-ack` is a pre-declaration required BEFORE any subsequent tool use is allowed.
+- Corrective actions (deleting a file, reverting a change, etc.) can only be executed AFTER gate-ack.
+- Therefore, a gate-ack reason that says "I will do X to fix this" is legitimate and expected — do NOT flag future corrective intent as a violation.
+- Only flag gate-ack reasons that contain fabrication or unjustified inference (e.g., claiming user permission that was never given, asserting facts not in evidence).\
 """
 
 
@@ -63,6 +69,19 @@ def _read_transcript(transcript_path: str) -> list:
     return messages
 
 
+def _get_msg_role(msg: dict) -> str:
+    """Extract role from either flat or nested (message.role) transcript format."""
+    return msg.get('role') or (msg.get('message') or {}).get('role', '')
+
+
+def _get_msg_content(msg: dict) -> list:
+    """Extract content from either flat or nested (message.content) transcript format."""
+    content = msg.get('content')
+    if content is None:
+        content = (msg.get('message') or {}).get('content', [])
+    return content if isinstance(content, list) else []
+
+
 def _get_last_turn_info(messages: list) -> tuple:
     """Return (tools_used: set, last_turn_text: str) for the last assistant turn."""
     tools_used = set()
@@ -70,13 +89,17 @@ def _get_last_turn_info(messages: list) -> tuple:
 
     last_user_idx = -1
     for i, msg in enumerate(messages):
-        if msg.get('role') == 'user':
+        if _get_msg_role(msg) == 'user':
+            content = _get_msg_content(msg)
+            # Skip pure tool-result injections (role=user but not a conversational turn)
+            if len(content) > 0 and all(isinstance(b, dict) and b.get('type') == 'tool_result' for b in content):
+                continue
             last_user_idx = i
 
     for msg in messages[last_user_idx + 1:]:
-        if msg.get('role') != 'assistant':
+        if _get_msg_role(msg) != 'assistant':
             continue
-        content = msg.get('content', [])
+        content = _get_msg_content(msg)
         if isinstance(content, str):
             lines.append(content[:500])
         elif isinstance(content, list):
@@ -132,13 +155,7 @@ def _evaluate(memory_content: str, last_turn_text: str, model: str, timeout: int
 
 
 def _block_response(reason: str) -> None:
-    print(json.dumps({
-        'hookSpecificOutput': {
-            'hookEventName': 'Stop',
-            'decision': 'block',
-            'reason': reason,
-        }
-    }))
+    print(json.dumps({'decision': 'block', 'reason': reason}))
     sys.exit(0)
 
 

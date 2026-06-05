@@ -22,7 +22,7 @@
   },
   "tenno_koe": {
     "enabled": true,
-    "watch_tools": ["Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"],
+    "watch_tools": ["Edit", "Write", "NotebookEdit", "MultiEdit"],
     "model": "haiku",
     "timeout": 30,
     "min_reason_length": 20,

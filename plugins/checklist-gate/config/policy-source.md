@@ -36,7 +36,7 @@
 ## 天の声（tenno_koe:会話モニタリング）
 
 - **有効**: はい
-- **監視ツール**: `Edit`, `Write`, `Bash`, `NotebookEdit`, `MultiEdit`
+- **監視ツール**: `Edit`, `Write`, `NotebookEdit`, `MultiEdit`
 - **モデル**: `haiku`
 - **タイムアウト（秒）**: 30
 - **最低 reason 文字数**: 20
