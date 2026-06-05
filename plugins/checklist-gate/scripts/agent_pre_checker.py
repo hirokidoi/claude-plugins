@@ -43,7 +43,7 @@ def _load_policy() -> dict:
 
 
 def _find_memory_path(cwd: str):
-    project_key = cwd.replace('/', '-')
+    project_key = cwd.replace('/', '-').replace('_', '-')
     base = Path.home() / '.claude_config' / 'projects' / project_key / 'memory' / 'MEMORY.md'
     if base.exists():
         return base
