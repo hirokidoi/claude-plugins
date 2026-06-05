@@ -114,7 +114,9 @@ def _get_last_turn_info(messages: list) -> tuple:
             continue
         content = _get_msg_content(msg)
         if isinstance(content, str):
-            lines.append(content[:500])
+            first_line = content.strip().split('\n')[0][:100]
+            if first_line:
+                lines.append(first_line)
         elif isinstance(content, list):
             for block in content:
                 if not isinstance(block, dict):
@@ -123,7 +125,9 @@ def _get_last_turn_info(messages: list) -> tuple:
                 if btype == 'text':
                     text = block.get('text', '').strip()
                     if text:
-                        lines.append(text[:500])
+                        first_line = text.split('\n')[0][:100]
+                        if first_line:
+                            lines.append(first_line)
                 elif btype == 'tool_use':
                     name = block.get('name', '')
                     tools_used.add(name)
