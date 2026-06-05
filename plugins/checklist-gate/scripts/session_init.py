@@ -67,13 +67,16 @@ def main() -> None:
     deleted_ak = state.cleanup_old_acks(keep_days=30)
     # Parent table last (30-day retention)
     deleted_ss = state.cleanup_old_sessions(keep_days=30)
-    deleted_total = deleted_gt + deleted_up + deleted_gd + deleted_sc + deleted_ak + deleted_ss
+    # Analytics table (90-day retention)
+    deleted_tk = state.cleanup_old_tenno_koe_evals(keep_days=90)
+    deleted_total = deleted_gt + deleted_up + deleted_gd + deleted_sc + deleted_ak + deleted_ss + deleted_tk
     if deleted_total:
         print(
             f'[session_init] Housekeeping: deleted '
             f'{deleted_gt} gate_toggles, {deleted_up} user_prompts, '
             f'{deleted_gd} gate_denies, {deleted_sc} session_checks, '
-            f'{deleted_ak} acks, {deleted_ss} sessions',
+            f'{deleted_ak} acks, {deleted_ss} sessions, '
+            f'{deleted_tk} tenno_koe_evals',
             file=sys.stderr,
         )
 

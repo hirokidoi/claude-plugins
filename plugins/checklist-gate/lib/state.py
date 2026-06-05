@@ -64,6 +64,16 @@ class GateToggle:
     updated_at: str
 
 
+@dataclass
+class TennoKoeEval:
+    id: int
+    session_id: str
+    created_at: str
+    verdict: str
+    turn_text: Optional[str]
+    duration_ms: Optional[int]
+
+
 # --- Schema DDL ---
 
 _SCHEMA_SQL = """
@@ -118,6 +128,17 @@ CREATE TABLE IF NOT EXISTS gate_toggles (
     updated_at TEXT    NOT NULL,
     UNIQUE(session_id, gate_name)
 );
+
+CREATE TABLE IF NOT EXISTS tenno_koe_evals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL,
+    verdict     TEXT    NOT NULL,
+    turn_text   TEXT,
+    duration_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tenno_koe_evals_session
+    ON tenno_koe_evals(session_id);
 """
 
 
@@ -532,6 +553,43 @@ class State:
         cursor = conn.execute(
             'DELETE FROM gate_denies WHERE session_id IN '
             '(SELECT session_id FROM sessions WHERE started_at < ?)',
+            (cutoff,),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    # --- TennoKoeEval operations ---
+
+    def record_tenno_koe_eval(
+        self,
+        session_id: str,
+        verdict: str,
+        turn_text: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+    ) -> None:
+        """Record a tenno_koe LLM evaluation result."""
+        conn = self._get_conn()
+        conn.execute(
+            'INSERT INTO tenno_koe_evals (session_id, created_at, verdict, turn_text, duration_ms)'
+            ' VALUES (?, ?, ?, ?, ?)',
+            (session_id, self._now(), verdict,
+             turn_text[:2000] if turn_text else None, duration_ms),
+        )
+        conn.commit()
+
+    def cleanup_old_tenno_koe_evals(self, keep_days: int = 90) -> int:
+        """Delete tenno_koe_evals older than keep_days.
+
+        Returns:
+            Number of deleted rows.
+        """
+        conn = self._get_conn()
+        cutoff = (
+            datetime.datetime.now(datetime.timezone.utc)
+            - datetime.timedelta(days=keep_days)
+        ).isoformat()
+        cursor = conn.execute(
+            'DELETE FROM tenno_koe_evals WHERE created_at < ?',
             (cutoff,),
         )
         conn.commit()

@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +37,18 @@ If there is a clear rule violation, output ONLY:
 If no violation: OK
 
 Rules: default to OK when uncertain. No general advice or speculation. Flag only clear, fact-based violations.
+
+Evaluation scope:
+- IN SCOPE: the content or location of what was created/modified violates an explicit project
+  prohibition stated in MEMORY.md (e.g. "do not write files to design/", "do not push without
+  running tests"). Focus on WHAT was done and WHERE, not HOW the assistant conducted itself.
+- OUT OF SCOPE — do NOT flag:
+  - Procedural violations: whether the assistant asked for approval before acting, whether
+    files were read before editing, communication style, etc. These cannot be corrected
+    after the fact and are not actionable by this hook.
+  - CLAUDE.md behavioral rules (approval workflow, read-before-edit, etc.): these govern
+    how Claude operates, not whether the content of actions violates project-specific rules.
+  - General best practices or style issues not explicitly stated as a project prohibition.
 
 Important context about gate-ack:
 - `gate-ack` is a pre-declaration required BEFORE any subsequent tool use is allowed.
@@ -236,7 +249,16 @@ def main() -> None:
         # --- 4. Evaluate with LLM ---
         model = tenno_koe_cfg.get('model', 'haiku')
         timeout = tenno_koe_cfg.get('timeout', 30)
+        t0 = time.monotonic()
         verdict = _evaluate(memory_content, last_turn_text, model, timeout)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+
+        eval_verdict = verdict.strip() if verdict else 'TIMEOUT'
+        state.record_tenno_koe_eval(
+            session_id, eval_verdict,
+            turn_text=last_turn_text,
+            duration_ms=duration_ms,
+        )
 
         if verdict:
             cleaned = verdict.strip()
