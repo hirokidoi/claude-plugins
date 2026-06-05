@@ -114,8 +114,27 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 | name | ゲートの識別名 |
 | description | ゲートの説明（英語推奨） |
 | trigger | トリガー条件の定義（後述） |
-| require | このゲートが要求する ack 項目名の配列。`ack_items` に存在する名前を指定。複数指定した場合、**全ての ack が揃わないとゲートを通過できない**（ToDo リスト的なチェックリストとして機能する）。session 型と consumable 型の混在も可能 |
+| require | このゲートが要求する ack 項目名の配列。複数指定した場合、**全ての ack が揃わないとゲートを通過できない**。`[]`（空配列）にすると天の声ゲートになる（後述） |
+| message | 天の声ゲート専用。`require: []` のときのみ有効。トリガーに一致したターン最初のツール使用時に Claude へ additionalContext として注入する文字列 |
 | enabled | `true` で有効、`false` で無効 |
+
+### 天の声ゲート（nudge gate）
+
+`require: []` かつ `message` を指定したゲートは**天の声ゲート**として動作します。deny せず、そのターン最初のトリガー一致時に `message` を additionalContext として Claude に注入します。
+
+```json
+{
+  "name": "agent_nudge",
+  "description": "Agent 起動前のルールリマインダー",
+  "trigger": { "patterns": ["Agent(*)"], "except_patterns": [] },
+  "require": [],
+  "message": "[天の声] CLAUDE.md のルール確認した？",
+  "enabled": true
+}
+```
+
+- LLM 呼び出しなし・ブロックなし・ack 不要で摩擦ゼロ
+- 「そのターン最初の1回だけ」注入するため、同一ターン内に Agent を複数回起動しても重複しない
 
 ---
 

@@ -119,6 +119,13 @@ CREATE TABLE IF NOT EXISTS gate_toggles (
     UNIQUE(session_id, gate_name)
 );
 
+CREATE TABLE IF NOT EXISTS nudge_firings (
+    session_id TEXT    NOT NULL,
+    nudge_name TEXT    NOT NULL,
+    prompt_id  INTEGER NOT NULL,
+    PRIMARY KEY (session_id, nudge_name)
+);
+
 """
 
 
@@ -554,6 +561,63 @@ class State:
         cursor = conn.execute(
             'DELETE FROM sessions WHERE started_at < ?',
             (cutoff,),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    # --- NudgeFiring operations ---
+
+    def get_latest_prompt_id(self, session_id: str) -> Optional[int]:
+        """Return the latest prompt_id for this session, or None if no prompts yet."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            'SELECT MAX(id) FROM user_prompts WHERE session_id = ?',
+            (session_id,),
+        )
+        row = cursor.fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def was_nudge_fired_this_turn(
+        self, session_id: str, nudge_name: str, current_prompt_id: int
+    ) -> bool:
+        """Return True if this nudge was already fired during the current turn."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            'SELECT prompt_id FROM nudge_firings WHERE session_id = ? AND nudge_name = ?',
+            (session_id, nudge_name),
+        )
+        row = cursor.fetchone()
+        return row is not None and row[0] == current_prompt_id
+
+    def record_nudge_firing(
+        self, session_id: str, nudge_name: str, prompt_id: int
+    ) -> None:
+        """Record (or update) the prompt_id at which this nudge last fired.
+
+        One row per (session_id, nudge_name) is maintained via INSERT OR REPLACE.
+        Each new turn overwrites the previous prompt_id, so was_nudge_fired_this_turn
+        returns False on the next turn, allowing the nudge to fire again.
+        """
+        conn = self._get_conn()
+        conn.execute(
+            'INSERT OR REPLACE INTO nudge_firings (session_id, nudge_name, prompt_id)'
+            ' VALUES (?, ?, ?)',
+            (session_id, nudge_name, prompt_id),
+        )
+        conn.commit()
+
+    def cleanup_nudge_firings_for_old_sessions(self) -> int:
+        """Delete nudge_firings whose session no longer exists.
+
+        Call after cleanup_old_sessions.
+
+        Returns:
+            Number of deleted rows.
+        """
+        conn = self._get_conn()
+        cursor = conn.execute(
+            'DELETE FROM nudge_firings WHERE session_id NOT IN'
+            ' (SELECT session_id FROM sessions)'
         )
         conn.commit()
         return cursor.rowcount

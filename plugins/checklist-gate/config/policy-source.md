@@ -55,3 +55,11 @@
 - **except_patterns**: `Bash(git push --dry-run *)`
 - **要求 ack**: user_authorized_push
 - **有効**: はい
+
+### agent_nudge
+- **説明**: Agent 起動前のルールリマインダー（天の声）
+- **patterns**: `Agent(*)`
+- **except_patterns**: なし
+- **要求 ack**: なし
+- **メッセージ**: [天の声] CLAUDE.md のルール確認した？
+- **有効**: はい

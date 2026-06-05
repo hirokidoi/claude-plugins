@@ -50,6 +50,17 @@
       },
       "require": ["user_authorized_push"],
       "enabled": true
+    },
+    {
+      "name": "agent_nudge",
+      "description": "Agent 起動前のルールリマインダー（天の声）",
+      "trigger": {
+        "patterns": ["Agent(*)"],
+        "except_patterns": []
+      },
+      "require": [],
+      "message": "[天の声] CLAUDE.md のルール確認した？",
+      "enabled": true
     }
   ]
 }

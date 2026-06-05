@@ -486,5 +486,56 @@ class TestTransaction(_StateTestBase):
         self.assertTrue(self.state.has_session_check('s1', 'ok-item'))
 
 
+class TestNudgeFirings(_StateTestBase):
+
+    def test_get_latest_prompt_id_no_prompts(self) -> None:
+        self._create_session('s1')
+        self.assertIsNone(self.state.get_latest_prompt_id('s1'))
+
+    def test_get_latest_prompt_id_returns_max(self) -> None:
+        self._create_session('s1')
+        self.state.add_user_prompt('s1', 'first')
+        pid2 = self.state.add_user_prompt('s1', 'second')
+        self.assertEqual(self.state.get_latest_prompt_id('s1'), pid2)
+
+    def test_was_nudge_fired_not_recorded(self) -> None:
+        self._create_session('s1')
+        self.assertFalse(self.state.was_nudge_fired_this_turn('s1', 'gate1', 42))
+
+    def test_was_nudge_fired_same_prompt_id(self) -> None:
+        self._create_session('s1')
+        self.state.record_nudge_firing('s1', 'gate1', 42)
+        self.assertTrue(self.state.was_nudge_fired_this_turn('s1', 'gate1', 42))
+
+    def test_was_nudge_fired_different_prompt_id(self) -> None:
+        # Different prompt_id means a new turn → should fire again
+        self._create_session('s1')
+        self.state.record_nudge_firing('s1', 'gate1', 1)
+        self.assertFalse(self.state.was_nudge_fired_this_turn('s1', 'gate1', 2))
+
+    def test_record_nudge_firing_upsert(self) -> None:
+        # INSERT OR REPLACE keeps exactly one row per (session, gate)
+        self._create_session('s1')
+        self.state.record_nudge_firing('s1', 'gate1', 1)
+        self.state.record_nudge_firing('s1', 'gate1', 2)
+        # After two records, only the latest prompt_id is retained
+        self.assertTrue(self.state.was_nudge_fired_this_turn('s1', 'gate1', 2))
+        self.assertFalse(self.state.was_nudge_fired_this_turn('s1', 'gate1', 1))
+
+    def test_cleanup_nudge_firings_for_old_sessions(self) -> None:
+        self._create_session('alive')
+        self._create_session('dead')
+        self.state.record_nudge_firing('alive', 'gate1', 1)
+        self.state.record_nudge_firing('dead', 'gate1', 1)
+        # Delete the 'dead' session directly
+        conn = self.state._get_conn()
+        conn.execute("DELETE FROM sessions WHERE session_id = 'dead'")
+        conn.commit()
+        deleted = self.state.cleanup_nudge_firings_for_old_sessions()
+        self.assertEqual(deleted, 1)
+        # 'alive' nudge_firing remains
+        self.assertTrue(self.state.was_nudge_fired_this_turn('alive', 'gate1', 1))
+
+
 if __name__ == '__main__':
     unittest.main()

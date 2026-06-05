@@ -34,7 +34,7 @@ policy-source.md に「肯定応答キーワード」セクションがある場
 - `trigger.except_patterns`（`exclude_pattern` ではない）: `Tool(パターン)` 形式の文字列の配列。除外対象を指定
 
 スキーマ検証項目:
-- `gates[].require` の ack 名が `ack_items` に存在するか
+- `gates[].require` の ack 名が `ack_items` に存在するか（天の声ゲートは `require: []` のため対象外）
 - `trigger.patterns` が配列であるか
 - `min_reason_length` が整数か、`type` が consumable / session か
 - `affirm_keywords`（トップレベル）が文字列の配列であるか（省略可、存在する場合は空配列不可・最低1つ必要）
@@ -57,5 +57,16 @@ user-prompt-match タイプの ack 項目には追加の必須フィールドが
 | 除外キーワード | except_keywords | 同上。省略時は `[]` |
 | 有効発話数 | max_prompt_distance | 数値に変換。省略時は `3` |
 | ヒント | hint | そのまま文字列として出力 |
+
+### policy-source.md → policy.json の変換ルール（天の声ゲート）
+
+ゲート定義に「要求 ack: なし」と「メッセージ」が含まれる場合、`require: []` ＋ `message` フィールドを持つ天の声ゲートとして変換する。
+
+| Markdown フィールド | policy.json フィールド | 変換ルール |
+|---|---|---|
+| 要求 ack | require | `なし` → `[]` |
+| メッセージ | message | そのまま文字列として出力（省略時は `message` キー自体を出力しない） |
+
+`require: []` かつ `message` がある場合、そのゲートは天の声ゲート（nudge gate）として動作する。
 
 **重要**: 不明な点がある場合は `config/policy.json.example`（プラグインコードディレクトリ内）を Read して正確なスキーマを確認すること。

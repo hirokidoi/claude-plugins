@@ -389,6 +389,18 @@ def _deny_response(reason: str) -> None:
     sys.exit(0)
 
 
+def _nudge_response(message: str) -> None:
+    """Output an additionalContext response for nudge injection and exit."""
+    response = {
+        'hookSpecificOutput': {
+            'hookEventName': 'PreToolUse',
+            'additionalContext': message,
+        }
+    }
+    print(json.dumps(response))
+    sys.exit(0)
+
+
 def _updated_input_response(tool_input: dict, new_command: str) -> None:
     """Output an updatedInput JSON response for session-id injection."""
     updated = dict(tool_input)
@@ -578,6 +590,8 @@ def main() -> None:
         ack_items_cfg = policy.get('ack_items', {})
         gates = policy.get('gates', [])
 
+        nudge_messages = []
+
         # Evaluate each gate
         for gate in gates:
             if not gate.get('enabled', True):
@@ -599,6 +613,24 @@ def main() -> None:
             if except_patterns and _matches_any_pattern(except_patterns, tool_name, tool_input):
                 continue
 
+            # Nudge gate: no require acks, has message → inject context once per turn.
+            # If a deny gate fires later in the same loop, _deny_response exits
+            # immediately and any accumulated nudge_messages are discarded — the
+            # blocked tool use gets the deny reason, not nudges. This is intentional.
+            message = gate.get('message', '')
+            if not require and message:
+                latest_prompt_id = state.get_latest_prompt_id(session_id)
+                # Skip if no user prompts recorded yet (e.g. very first tool call of
+                # the session before UserPromptSubmit has fired). prompt_id=None
+                # cannot be stored in nudge_firings, so we pass silently.
+                if latest_prompt_id is not None:
+                    if not state.was_nudge_fired_this_turn(
+                        session_id, gate_name, latest_prompt_id
+                    ):
+                        state.record_nudge_firing(session_id, gate_name, latest_prompt_id)
+                        nudge_messages.append(message)
+                continue
+
             missing = [
                 item for item in require
                 if not _check_ack(state, session_id, item, ack_items_cfg)
@@ -611,6 +643,9 @@ def main() -> None:
                 _deny_response(reason)
 
             _consume_acks(state, session_id, gate_name, require, ack_items_cfg)
+
+        if nudge_messages:
+            _nudge_response('\n'.join(nudge_messages))
     finally:
         state.close()
 
