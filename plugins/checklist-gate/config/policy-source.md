@@ -35,8 +35,6 @@
 
 ## 天の声（tenno_koe:会話モニタリング）
 
-Markdown フィールド → JSON フィールド: 有効→enabled / 監視ツール→watch_tools / モデル→model / タイムアウト（秒）→timeout / 最低 reason 文字数→min_reason_length / ヒント→hint
-
 - **有効**: はい
 - **監視ツール**: `Edit`, `Write`, `Bash`, `NotebookEdit`, `MultiEdit`
 - **モデル**: `haiku`
