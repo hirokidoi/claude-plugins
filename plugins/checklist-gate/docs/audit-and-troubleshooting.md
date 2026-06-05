@@ -119,6 +119,14 @@ rm $CLAUDE_PLUGIN_DATA/checklist-gate.sqlite*
 2. **policy.json の書式をチェックする** -- JSON の構文エラーがないか確認する。checklist-gate:apply-config skill 経由で再反映するのが最も確実
 3. **policy.json が存在するか確認する** -- `$CLAUDE_PLUGIN_DATA/policy.json` が正しい場所にあるか確認する。未作成の場合は `checklist-gate:edit-config` → `checklist-gate:apply-config` skill で生成する
 
+### 天の声でブロックされて応答を終了できない
+
+1. ブロックメッセージの `[天の声] <違反内容>` を確認する
+2. プロジェクトの MEMORY.md を参照し、どのルール違反に該当するかを確認する
+3. ルール違反への対応を行い、`gate-ack tenno_koe_cleared --reason "<修正内容>"` を宣言する（deny を受けた後にのみ受け付けられる）
+
+どうしても抜け出せない場合は `gate-toggle off tenno_koe` でセッション中の天の声評価を一時無効化できます（セッション終了時に自動復帰）。
+
 ### セッション再開時の挙動
 
 - **session 型の ack**（例: `docs_checked`） -- セッション中は維持される。新しいセッションでは再度 ack が必要

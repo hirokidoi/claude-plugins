@@ -7,12 +7,14 @@ policy.json は以下のセクションで構成されます。
 - **affirm_keywords** -- 肯定応答の判定キーワード（トップレベル設定）
 - **ack_items** -- 確認（ack）項目の定義
 - **gates** -- ゲートの定義（どの操作の前に、どの ack を要求するか）
+- **tenno_koe** -- 天の声（会話モニタリング）のビルトイン設定（省略可）
 
 ```json
 {
   "affirm_keywords": ["OK", "はい", "よい", "いいよ", "お願い", "yes", "sure", "うん", "おけ", "いいね"],
   "ack_items": { ... },
-  "gates": [ ... ]
+  "gates": [ ... ],
+  "tenno_koe": { ... }
 }
 ```
 
@@ -143,6 +145,76 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 - `Read(*README*)` -- README を含むパスの Read
 - `Bash(git push *)` -- git push コマンド
 - `Bash(git push --dry-run *)` -- dry-run 付き git push
+
+---
+
+## 天の声（tenno_koe）
+
+天の声は、各ターン終了時および Agent 起動前後に LLM がプロジェクトの MEMORY.md に照らして違反を検出し、必要に応じてブロックまたは通知するビルトイン機能です。
+
+通常の `gates`（PreToolUse パターンマッチ）とは異なり、LLM による評価で動作し、`ack_items` や `gates` への記述は不要です。
+
+### 動作するフック
+
+| フック | タイミング | 動作 |
+|---|---|---|
+| Stop | 各応答終了時 | `watch_tools` を使ったターンを評価。違反あれば応答をブロックし `tenno_koe_cleared` ack を要求。ack が成立するまでブロックは継続 |
+| PreToolUse（Agent） | Agent 起動前 | 手続き的違反があれば起動を deny |
+| PostToolUse（Agent） | Agent 完了後 | 手続き的ルール準拠を確認し additionalContext に結果を注入 |
+
+### policy.json の設定
+
+```json
+"tenno_koe": {
+  "enabled": true,
+  "watch_tools": ["Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"],
+  "model": "haiku",
+  "timeout": 30,
+  "min_reason_length": 20,
+  "hint": "天の声の指摘に対してどう対応したかを reason に記載して。"
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| enabled | `true` で有効、`false` で無効。省略時は `true`（デフォルト有効） |
+| watch_tools | Stop フックの評価フィルタ。これらのツールを使ったターンのみ評価する |
+| model | 評価に使用するモデル名（`claude --model` に渡す値） |
+| timeout | 評価のタイムアウト秒数 |
+| min_reason_length | `tenno_koe_cleared` ack の最低 reason 文字数 |
+| hint | ブロック時に Claude に表示されるガイドメッセージ |
+
+### ビルトイン ack 項目と gate
+
+`tenno_koe` が有効な場合、以下の項目が自動的に追加されます。**policy.json や policy-source.md に明示的に記述する必要はありません**：
+
+- **`tenno_koe_cleared`**（consumable ack）: Stop フックで違反を検出したとき、この ack を宣言するまで応答をブロックする
+- **`tenno_koe` gate**: `gate-toggle list` で確認できる。`gate-toggle off tenno_koe` でセッション中の評価を一時無効化できる
+
+### ブロックされたときの対応
+
+Stop フックで違反を検出すると以下のメッセージが表示されます：
+
+```
+[天の声] <違反内容>
+
+gate-ack tenno_koe_cleared --reason "<対応内容>" を実行してください。
+```
+
+`gate-ack tenno_koe_cleared` を実行するまで、応答を終了できません。deny-first が適用されるため、ブロックを受けた後にのみ ack が受け付けられます。
+
+### policy-source.md での記述
+
+```markdown
+## 天の声（tenno_koe:会話モニタリング）
+
+- **有効**: はい
+- **監視ツール**: `Edit`, `Write`, `Bash`, `NotebookEdit`, `MultiEdit`
+- **モデル**: `haiku`
+- **タイムアウト（秒）**: 30
+- **最低 reason 文字数**: 20
+- **ヒント**: 天の声の指摘に対してどう対応したかを reason に記載して。
+```
 
 ---
 

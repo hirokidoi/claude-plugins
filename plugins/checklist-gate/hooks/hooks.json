@@ -28,8 +28,37 @@
             "command": "python3 \"$CLAUDE_PLUGIN_ROOT/scripts/gate_check.py\""
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/scripts/agent_pre_checker.py\""
+          }
+        ]
       }
     ],
-    "Stop": []
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/scripts/agent_watcher.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/scripts/stop_judge.py\""
+          }
+        ]
+      }
+    ]
   }
 }

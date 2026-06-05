@@ -22,7 +22,7 @@ from state import State
 
 
 def _load_policy() -> dict:
-    """Load policy.json from $CLAUDE_PLUGIN_DATA."""
+    """Load policy.json from $CLAUDE_PLUGIN_DATA and inject built-in tenno_koe items."""
     policy_path = os.path.join(
         os.environ['CLAUDE_PLUGIN_DATA'], 'policy.json'
     )
@@ -35,7 +35,23 @@ def _load_policy() -> dict:
         )
         return {}
     with open(policy_path, encoding='utf-8') as f:
-        return json.load(f)
+        policy = json.load(f)
+
+    # Inject built-in tenno_koe_cleared ack item and gate if tenno_koe is enabled
+    tenno_koe_cfg = policy.get('tenno_koe', {})
+    if tenno_koe_cfg and tenno_koe_cfg.get('enabled', True):
+        policy.setdefault('ack_items', {})['tenno_koe_cleared'] = {
+            'type': 'consumable',
+            'min_reason_length': tenno_koe_cfg.get('min_reason_length', 20),
+            'hint': tenno_koe_cfg.get('hint', ''),
+        }
+        policy.setdefault('gates', []).append({
+            'name': 'tenno_koe',
+            'require': ['tenno_koe_cleared'],
+            'enabled': True,
+        })
+
+    return policy
 
 
 def _load_deny_template() -> str:

@@ -58,4 +58,19 @@ user-prompt-match タイプの ack 項目には追加の必須フィールドが
 | 有効発話数 | max_prompt_distance | 数値に変換。省略時は `3` |
 | ヒント | hint | そのまま文字列として出力 |
 
+### policy-source.md → policy.json の変換ルール（天の声）
+
+policy-source.md に「天の声（会話モニタリング）」セクションがある場合、トップレベルの `tenno_koe` に変換する。
+
+| Markdown フィールド | policy.json フィールド | 変換ルール |
+|---|---|---|
+| 有効 | enabled | `はい` → `true`、`いいえ` → `false` |
+| 監視ツール | watch_tools | バッククォートで囲まれたカンマ区切り → 文字列の配列 |
+| モデル | model | バッククォートを除いた文字列 |
+| タイムアウト（秒） | timeout | 数値に変換 |
+| 最低 reason 文字数 | min_reason_length | 数値に変換 |
+| ヒント | hint | そのまま文字列として出力 |
+
+`tenno_koe` セクションが省略された場合は `tenno_koe` キー自体を出力しない。
+
 **重要**: 不明な点がある場合は `config/policy.json.example`（プラグインコードディレクトリ内）を Read して正確なスキーマを確認すること。

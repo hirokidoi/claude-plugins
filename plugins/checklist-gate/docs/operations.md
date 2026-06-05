@@ -53,7 +53,10 @@ checklist-gate の設定は **Markdown 形式の設定書**（`$CLAUDE_PLUGIN_DA
   task_start: ON (default)
   git_commit_gate: OFF (toggled)
   git_push_gate: ON (default)
+  tenno_koe: ON (default)
 ```
+
+`tenno_koe` は policy.json に `tenno_koe` セクションが存在し `enabled: true` の場合に自動的に一覧に追加されます。
 
 - `(default)` -- policy.json の設定どおり
 - `(toggled)` -- セッション中に手動で切り替えた状態

@@ -20,6 +20,14 @@
       "max_prompt_distance": 3
     }
   },
+  "tenno_koe": {
+    "enabled": true,
+    "watch_tools": ["Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"],
+    "model": "haiku",
+    "timeout": 30,
+    "min_reason_length": 20,
+    "hint": "天の声の指摘に対してどう対応したかを reason に記載して。"
+  },
   "gates": [
     {
       "name": "task_start",
