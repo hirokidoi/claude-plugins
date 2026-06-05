@@ -22,7 +22,7 @@ from state import State
 
 
 def _load_policy() -> dict:
-    """Load policy.json from $CLAUDE_PLUGIN_DATA and inject built-in tenno_koe items."""
+    """Load policy.json from $CLAUDE_PLUGIN_DATA."""
     policy_path = os.path.join(
         os.environ['CLAUDE_PLUGIN_DATA'], 'policy.json'
     )
@@ -36,20 +36,6 @@ def _load_policy() -> dict:
         return {}
     with open(policy_path, encoding='utf-8') as f:
         policy = json.load(f)
-
-    # Inject built-in tenno_koe_cleared ack item and gate if tenno_koe is enabled
-    tenno_koe_cfg = policy.get('tenno_koe', {})
-    if tenno_koe_cfg and tenno_koe_cfg.get('enabled', True):
-        policy.setdefault('ack_items', {})['tenno_koe_cleared'] = {
-            'type': 'consumable',
-            'min_reason_length': tenno_koe_cfg.get('min_reason_length', 20),
-            'hint': tenno_koe_cfg.get('hint', ''),
-        }
-        policy.setdefault('gates', []).append({
-            'name': 'tenno_koe',
-            'require': ['tenno_koe_cleared'],
-            'enabled': True,
-        })
 
     return policy
 
@@ -606,20 +592,6 @@ def main() -> None:
 
             patterns = trigger.get('patterns', [])
             except_patterns = trigger.get('except_patterns', [])
-
-            # tenno_koe gate: only active when Stop hook has recorded a pending deny.
-            # It has no trigger patterns; instead it activates on any tool use.
-            if gate_name == 'tenno_koe':
-                if not state.has_deny(session_id, 'tenno_koe'):
-                    continue
-                if state.has_unconsumed_ack(session_id, 'tenno_koe_cleared'):
-                    state.consume_oldest_unconsumed_ack(session_id, 'tenno_koe_cleared')
-                    state.clear_deny(session_id, 'tenno_koe')
-                else:
-                    # deny already recorded by stop_judge.py — no need to record_deny here
-                    reason = _build_deny_reason(gate_name, require, ack_items_cfg)
-                    _deny_response(reason)
-                continue
 
             if not _matches_any_pattern(patterns, tool_name, tool_input):
                 continue
