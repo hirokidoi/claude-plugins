@@ -8,4 +8,5 @@ __pycache__/
 ._*
 .claude/
 design/
+tmp/
 config/policy.json
