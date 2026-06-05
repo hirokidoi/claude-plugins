@@ -70,6 +70,8 @@ user-prompt-match タイプの ack 項目には、共通フィールドに加え
 | except_keywords | match 後に除外するキーワードの配列（OR 条件: いずれか1つが含まれれば除外）。省略時は空配列扱い |
 | max_prompt_distance | gate-ack 時点から遡って直近 N 件の発話のみ有効。デフォルト: 3 |
 
+`policy-source.md`（Markdown 形式）でゲートを定義する場合、上記フィールドはそれぞれ「マッチキーワード」「除外キーワード」「有効発話数」と記述します。apply-config skill が JSON フィールド名に自動変換します。
+
 ### --affirm オプション（肯定応答フロー）
 
 ユーザー発話が「OK」「はい」などキーワードを含まない肯定応答の場合、`--affirm` オプションを使用します。
@@ -117,15 +119,12 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 
 ---
 
-## ゲートのトリガー種別
+## trigger の設定
 
-### gate
-
-ツール呼び出しや Bash コマンド実行をブロックするゲート。patterns / except_patterns に `Tool(パターン)` 形式で対象を指定する。Claude Code の permissions と同じ記法。
+ツール呼び出しや Bash コマンド実行をブロックするパターンを指定します。
 
 ```json
 "trigger": {
-  "type": "gate",
   "patterns": ["Edit(*)", "Write(*)", "Read(*)", "Glob(*)", "Grep(*)"],
   "except_patterns": ["Read(*README*)", "Read(*DEVELOPMENT*)", "Glob(*README*)", "Glob(*DEVELOPMENT*)"]
 }
@@ -133,7 +132,6 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 
 | フィールド | 説明 |
 |---|---|
-| type | `"gate"` を指定 |
 | patterns | ゲート対象の指定。`Tool(パターン)` 形式の文字列の配列 |
 | except_patterns | 除外パターンの配列。一致した場合は ack 未宣言でもゲートを通過する |
 
@@ -146,43 +144,18 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 - `Bash(git push *)` -- git push コマンド
 - `Bash(git push --dry-run *)` -- dry-run 付き git push
 
-### stop-time
-
-Claude がセッションを終了しようとする時に条件をチェックし、条件に該当すればセッション終了をブロックするゲート。
-
-```json
-"trigger": {
-  "type": "stop-time",
-  "check": "git-uncommitted"
-}
-```
-
-| フィールド | 説明 |
-|---|---|
-| type | `"stop-time"` を指定 |
-| check | 組み込みチェッカー名。`"git-uncommitted"`（トラッキング済みファイルの未コミット変更を検出。M/A/R/D ステータスが対象。untracked ファイルは対象外）または `"unconsumed-acks"`（未消費 ack の残存チェック） |
-
 ---
 
 ## 設定の編集と反映フロー
 
-checklist-gate では、Markdown 形式の設定書（`$CLAUDE_PLUGIN_DATA/policy-source.md`）を編集し、skill で JSON に変換・反映する方法を推奨しています。
-
-### 手順
-
-1. **設定書を開く** -- Claude に「ゲートの設定ファイルを開いて」と依頼する（`checklist-gate:edit-config` skill が起動）
-2. **Markdown を編集する** -- ack 項目やゲートの追加・変更・削除を Markdown 上で行う
-3. **JSON に変換・反映する** -- Claude に「ゲートの設定を反映して」と依頼する（`checklist-gate:apply-config` skill が起動）
-4. **差分を確認する** -- 既存の policy.json との差分が表示されるので、内容を確認して承認する
-5. **次回セッションから有効** -- 反映された設定は次回の SessionStart から有効になる
+設定の編集・反映手順については [運用ガイド](operations.md) を参照してください。
 
 ### apply-config が行う検証
 
 変換時に以下のスキーマ検証が自動的に行われます。
 
 - `gates[].require` で指定された ack 名が `ack_items` に存在するか
-- `trigger.type` が有効な種別か（gate / stop-time）
-- 種別ごとの必須フィールドが揃っているか
+- `trigger.patterns` が配列であるか
 - `min_reason_length` が整数か
 - `type` が有効な種別か（session / consumable / user-prompt-match）
 
@@ -208,7 +181,6 @@ policy-source.md に以下を追記します。
 ```
 ### config_edit_gate
 - **説明**: 設定ファイルの編集前に config_edit_ready を要求
-- **トリガー種別**: gate
 - **patterns**: `Edit(config/*.json)`, `Write(config/*.json)`
 - **except_patterns**: なし
 - **要求 ack**: config_edit_ready
@@ -247,7 +219,6 @@ policy-source.md に以下を追記します。
 ```
 ### deploy_gate
 - **説明**: デプロイコマンド実行前に全チェック項目の完了を要求
-- **トリガー種別**: gate
 - **patterns**: `Bash(deploy *)`
 - **except_patterns**: `Bash(deploy --dry-run *)`
 - **要求 ack**: tests_passed, staging_verified, user_authorized_deploy
@@ -294,7 +265,6 @@ policy-source.md に以下を追記します。
       "name": "git_push_gate",
       "description": "Require user_authorized_push before git push",
       "trigger": {
-        "type": "gate",
         "patterns": ["Bash(git push *)"],
         "except_patterns": ["Bash(git push --dry-run *)"]
       },
@@ -311,13 +281,3 @@ policy-source.md に以下を追記します。
 - ユーザーが「テスト通ったのでマージしよう」→ match_keywords に該当なし → ack 不可
 - AI が「push しますか？」→ ユーザーが「OK」→ affirm_keywords に該当 → `--affirm "push しますか？"` で通過
 
-### 例: 未コミット変更の検出ゲートを追加する（stop-time）
-
-```
-### unfinished_work
-- **説明**: セッション終了時に未コミット変更があればブロック
-- **トリガー種別**: stop-time
-- **チェック**: git-uncommitted
-- **要求 ack**: なし（チェック結果に基づき自動判定）
-- **有効**: はい
-```

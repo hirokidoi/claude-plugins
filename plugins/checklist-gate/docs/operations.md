@@ -16,7 +16,7 @@ checklist-gate の設定は **Markdown 形式の設定書**（`$CLAUDE_PLUGIN_DA
    - 「設定を反映して」「変換して反映して」などと伝える
    - skill が以下を自動で実行する:
      - Markdown から JSON 構造への変換
-     - スキーマ検証（ack 名の整合性、トリガー種別の妥当性、必須キーの確認など）
+     - スキーマ検証（ack 名の整合性、必須キーの確認など）
      - 既存 `policy.json` との diff 表示
      - ユーザー承認後に `$CLAUDE_PLUGIN_DATA/policy.json` を上書き
 4. **次回の SessionStart から新しい設定が有効になる**

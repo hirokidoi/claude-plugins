@@ -32,12 +32,10 @@ policy-source.md に「肯定応答キーワード」セクションがある場
 - `gates` は**配列**（オブジェクトではない）。各要素に `name` フィールドを含む
 - `trigger.patterns`（`pattern` ではない）: `Tool(パターン)` 形式の文字列の配列。Claude Code の permissions と同じ記法
 - `trigger.except_patterns`（`exclude_pattern` ではない）: `Tool(パターン)` 形式の文字列の配列。除外対象を指定
-- `trigger.check`: stop-time 用の組み込みチェッカー名（文字列）
 
 スキーマ検証項目:
 - `gates[].require` の ack 名が `ack_items` に存在するか
-- `trigger.type` が有効な種別か（gate / stop-time）
-- 種別ごとの必須キーが揃っているか
+- `trigger.patterns` が配列であるか
 - `min_reason_length` が整数か、`type` が consumable / session か
 - `affirm_keywords`（トップレベル）が文字列の配列であるか（省略可、存在する場合は空配列不可・最低1つ必要）
 

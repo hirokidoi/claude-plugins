@@ -14,7 +14,7 @@
     "user_authorized_push": {
       "type": "user-prompt-match",
       "min_reason_length": 20,
-      "hint": "ユーザー発話に明示的な push 指示があった？「pushして」のような直接の依頼が無ければユーザーに確認して。",
+      "hint": "直近のユーザー発話に明示的な push 指示があった？「pushして」のような直接の依頼が無ければユーザーに確認して。",
       "match_keywords": ["push", "プッシュ"],
       "except_keywords": ["dry-run", "ドライラン", "pushはまだ", "pushはしないで"],
       "max_prompt_distance": 3
@@ -23,9 +23,8 @@
   "gates": [
     {
       "name": "task_start",
-      "description": "Require docs_checked before most tool operations",
+      "description": "ファイル編集前に docs_checked を要求",
       "trigger": {
-        "type": "gate",
         "patterns": ["Edit(*)", "Write(*)", "Read(*)", "Glob(*)", "Grep(*)"],
         "except_patterns": ["Read(*README*)", "Read(*DEVELOPMENT*)", "Glob(*README*)", "Glob(*DEVELOPMENT*)"]
       },
@@ -34,9 +33,8 @@
     },
     {
       "name": "git_commit_gate",
-      "description": "Require commit_ready before git commit",
+      "description": "git commit 前に commit_ready を要求",
       "trigger": {
-        "type": "gate",
         "patterns": ["Bash(git commit *)"],
         "except_patterns": []
       },
@@ -45,9 +43,8 @@
     },
     {
       "name": "git_push_gate",
-      "description": "Require user_authorized_push before git push",
+      "description": "git push 前に user_authorized_push を要求",
       "trigger": {
-        "type": "gate",
         "patterns": ["Bash(git push *)"],
         "except_patterns": ["Bash(git push --dry-run *)"]
       },

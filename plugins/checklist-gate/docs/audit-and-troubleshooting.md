@@ -23,6 +23,8 @@ LIMIT 20;
 
 ### 特定セッションの ack 履歴
 
+`consumable` / `user-prompt-match` 型の ack は `acks` テーブルに記録される:
+
 ```sql
 SELECT item, reason, created_at, consumed_at
 FROM acks
@@ -30,7 +32,7 @@ WHERE session_id = '<セッションID>'
 ORDER BY created_at;
 ```
 
-session 型の ack（docs_checked など）は `session_checks` テーブルに記録される:
+`session` 型の ack（docs_checked など）は `session_checks` テーブルに記録される:
 
 ```sql
 SELECT item, reason, checked_at

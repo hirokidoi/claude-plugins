@@ -37,7 +37,6 @@
 
 ### task_start
 - **説明**: ファイル編集前に docs_checked を要求
-- **トリガー種別**: gate
 - **patterns**: `Edit(*)`, `Write(*)`, `Read(*)`, `Glob(*)`, `Grep(*)`
 - **except_patterns**: `Read(*README*)`, `Read(*DEVELOPMENT*)`, `Glob(*README*)`, `Glob(*DEVELOPMENT*)`
 - **要求 ack**: docs_checked
@@ -45,7 +44,6 @@
 
 ### git_commit_gate
 - **説明**: git commit 前に commit_ready を要求
-- **トリガー種別**: gate
 - **patterns**: `Bash(git commit *)`
 - **except_patterns**: なし
 - **要求 ack**: commit_ready
@@ -53,7 +51,6 @@
 
 ### git_push_gate
 - **説明**: git push 前に user_authorized_push を要求
-- **トリガー種別**: gate
 - **patterns**: `Bash(git push *)`
 - **except_patterns**: `Bash(git push --dry-run *)`
 - **要求 ack**: user_authorized_push

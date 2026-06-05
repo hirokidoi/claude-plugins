@@ -106,7 +106,7 @@ gate-ack --help-gates
 
 ## ゲートの一時的な ON/OFF 切替
 
-セッション中にゲートを一時的に無効化・有効化するには `gate-toggle` を使用します。
+セッション中にゲートを一時的に無効化・有効化するには `gate-toggle` コマンドまたは `checklist-gate:gate-on` / `checklist-gate:gate-off` skill を使います。
 
 ```
 gate-toggle off <ゲート名>    # ゲートを無効化
@@ -114,4 +114,4 @@ gate-toggle on <ゲート名>     # ゲートを有効化
 gate-toggle list             # 全ゲートの現在の状態を表示
 ```
 
-この切替はセッション単位で有効であり、次回セッションでは policy.json の設定に戻ります。
+この切替はセッション中のみ有効です。詳細は [運用ガイド](operations.md) を参照してください。

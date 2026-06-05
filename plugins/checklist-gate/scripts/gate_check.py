@@ -586,35 +586,29 @@ def main() -> None:
                 continue
 
             trigger = gate.get('trigger', {})
-            trigger_type = trigger.get('type', '')
             require = gate.get('require', [])
 
-            if trigger_type == 'stop-time':
+            patterns = trigger.get('patterns', [])
+            except_patterns = trigger.get('except_patterns', [])
+
+            if not _matches_any_pattern(patterns, tool_name, tool_input):
                 continue
 
-            if trigger_type == 'gate':
-                patterns = trigger.get('patterns', [])
-                except_patterns = trigger.get('except_patterns', [])
-
-                if not _matches_any_pattern(patterns, tool_name, tool_input):
-                    continue
-
-                if except_patterns and _matches_any_pattern(except_patterns, tool_name, tool_input):
-                    continue
-
-                missing = [
-                    item for item in require
-                    if not _check_ack(state, session_id, item, ack_items_cfg)
-                ]
-
-                if missing:
-                    # Record deny for deny-first enforcement
-                    state.record_deny(session_id, gate_name)
-                    reason = _build_deny_reason(gate_name, missing, ack_items_cfg)
-                    _deny_response(reason)
-
-                _consume_acks(state, session_id, gate_name, require, ack_items_cfg)
+            if except_patterns and _matches_any_pattern(except_patterns, tool_name, tool_input):
                 continue
+
+            missing = [
+                item for item in require
+                if not _check_ack(state, session_id, item, ack_items_cfg)
+            ]
+
+            if missing:
+                # Record deny for deny-first enforcement
+                state.record_deny(session_id, gate_name)
+                reason = _build_deny_reason(gate_name, missing, ack_items_cfg)
+                _deny_response(reason)
+
+            _consume_acks(state, session_id, gate_name, require, ack_items_cfg)
     finally:
         state.close()
 

@@ -5,7 +5,7 @@ Claude Code の操作に「確認ゲート」を設けるプラグイン。git c
 ## 特徴
 
 - **操作前の確認を強制** -- git commit、git push、ファイル編集など、指定した操作の前に ack（確認宣言）を必須化
-- **柔軟なゲート設定** -- gate / stop-time の2種類のトリガーでゲートを定義可能。patterns / except_patterns は `Tool(パターン)` 形式で記述（Claude Code の permissions と同じ記法）
+- **柔軟なゲート設定** -- gate トリガーで対象操作を定義可能。patterns / except_patterns は `Tool(パターン)` 形式で記述（Claude Code の permissions と同じ記法）
 - **Markdown ベースの設定管理** -- 設定書（policy-source.md）を編集し、skill で JSON に変換・反映
 - **セッション単位の状態管理** -- ack の有効範囲をセッション単位（1回限り）または消費型（毎回必要）で制御
 - **ランタイムでのゲート切替** -- gate-toggle コマンドでセッション中にゲートの ON/OFF を切替可能

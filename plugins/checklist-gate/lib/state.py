@@ -303,28 +303,6 @@ class State:
                 prompt_id=row['prompt_id'],
             )
 
-    def list_unconsumed_acks(self, session_id: str) -> List[Ack]:
-        """List all unconsumed acks for the session."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            'SELECT id, session_id, item, reason, created_at, consumed_at, prompt_id '
-            'FROM acks WHERE session_id = ? AND consumed_at IS NULL '
-            'ORDER BY created_at',
-            (session_id,),
-        ).fetchall()
-        return [
-            Ack(
-                id=row['id'],
-                session_id=row['session_id'],
-                item=row['item'],
-                reason=row['reason'],
-                created_at=row['created_at'],
-                consumed_at=row['consumed_at'],
-                prompt_id=row['prompt_id'],
-            )
-            for row in rows
-        ]
-
     # --- UserPrompt operations ---
 
     def add_user_prompt(self, session_id: str, prompt: str) -> int:

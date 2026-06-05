@@ -176,25 +176,6 @@ class TestConsumeOldestUnconsumedAck(_StateTestBase):
         self.assertIsNone(result)
 
 
-class TestListUnconsumedAcks(_StateTestBase):
-
-    def test_list_unconsumed_acks_only(self) -> None:
-        self._create_session('s1')
-        self.state.add_ack('s1', 'a', 'r1')
-        self.state.add_ack('s1', 'b', 'r2')
-        self.state.add_ack('s1', 'c', 'r3')
-        # Consume one
-        self.state.consume_oldest_unconsumed_ack('s1', 'a')
-
-        unconsumed = self.state.list_unconsumed_acks('s1')
-        items = [ack.item for ack in unconsumed]
-        self.assertEqual(items, ['b', 'c'])
-
-    def test_list_unconsumed_acks_empty(self) -> None:
-        self._create_session('s1')
-        self.assertEqual(self.state.list_unconsumed_acks('s1'), [])
-
-
 # ---- GateToggle operations ----
 
 
