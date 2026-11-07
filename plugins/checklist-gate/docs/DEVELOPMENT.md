@@ -42,7 +42,8 @@ gate_check.py（判定の順序は「純粋な計算 → DB」）
   +-- 4. policy.json を読み込んで検証する（lib/policy.py）
   |      無い: 通過 / 不正: 読み取り専用のツールと許可済みの policy.json の書き込み以外は deny
   +-- 5. 有効で trigger が当たるゲートを、DB を開かずに列挙する（lib/shell_parse.py で単純コマンドに分けて照合）
-  |      無ければ通過。require を持つゲートが 1 つでもあれば「止める必要あり」とする
+  |      無ければ通過。block のゲートが当たれば、DB を開かずに deny（当たった各ゲートの message を理由にする）
+  |      require を持つゲートが 1 つでもあれば「止める必要あり」とする
   +-- 6. DB を開いてゲートを評価する
   |      - 不足した user-prompt-match ack: 自動通過の根拠になる発話を探す
   |      - どれかのゲートが未充足: deny レスポンス（ack を要求するメッセージ）。gate_denies に記録（deny-first 用）。何も消費しない
@@ -72,20 +73,21 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 4. **deny**: ゲート条件未充足の場合、deny レスポンスを返却し、gate_denies テーブルに deny を記録する
 5. **gate-ack**: ゲートで拒否された場合、ack コマンドで条件を宣言する。deny-first により、deny が記録されていない場合は ack が拒否される
 6. **PreToolUse (再試行)**: 再度ツールを使用すると、ack 済みのため通過する
-7. **nudge gate**: `require: []` かつ `message` を持つゲートはそのターン最初の一致時に additionalContext を注入して通過（deny しない）
+7. **nudge gate**: `require: []` かつ `message` を持ち、block でないゲートはそのターン最初の一致時に additionalContext を注入して通過（deny しない）
+8. **block gate**: `block: true` のゲートは一致した時点で deny する。gate-ack もトグルも効かない
 
 ### 責務分担
 
 - **hooks (hooks.json)**: どのフックイベントでどのスクリプトを実行するかの宣言
 - **scripts/prompt_store.py**: UserPromptSubmit hook スクリプト。ユーザーの発話を DB に記録し、additionalContext で prompt_id をエージェントに通知する。システムの通知だけの発話は記録しない
-- **scripts/gate_check.py**: PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証・キーワードチェック・自動通過、gate-ack / gate-toggle コマンドの内部処理、天の声ゲート（nudge gate）の per-turn additionalContext 注入
+- **scripts/gate_check.py**: PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証・キーワードチェック・自動通過、gate-ack / gate-toggle コマンドの内部処理、天の声ゲート（nudge gate）の per-turn additionalContext 注入、絶対に止めるゲート（block gate）の deny
 - **scripts/validate_policy.py**: policy.json の検証 CLI。apply-config が書き込む前に使う
 - **lib/policy.py**: policy.json の読み込み・検証・既定値の補完。検証規則の正。gate_check.py・session_init.py・validate_policy.py が使う
 - **lib/shell_parse.py**: Bash コマンド行を単純コマンドに分ける字句解析器（引用符・置換・ヒアドキュメント・包みの解釈）
 - **lib/prompt_text.py**: 記録された発話から、IDE・貼り付け・システムの通知のブロックを取り除き、ユーザーが書いた部分を取り出す
 - **gate-ack / gate-toggle コマンド**: Claude が Bash で実行するコマンド。gate_check.py が PreToolUse フックで検出し、内部で処理する（外部バイナリは実行されない）
 - **State (state.py)**: SQLite を用いたデータの永続化（DAO 層）
-- **policy.json**: ゲートルール・ack 項目の宣言的定義。`require: []` ＋ `message` フィールドで天の声ゲートを定義する。書式は `lib/policy.py` が検証する
+- **policy.json**: ゲートルール・ack 項目の宣言的定義。`block: true` ＋ `message` で絶対に止めるゲートを、block でない `require: []` ＋ `message` で天の声ゲートを定義する。書式は `lib/policy.py` が検証する
 
 ---
 
@@ -98,7 +100,7 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 | hooks/hooks.json | フックイベント（SessionStart / UserPromptSubmit / PreToolUse）と実行するスクリプトの対応定義。`$CLAUDE_PLUGIN_ROOT` 環境変数を使って scripts/ 配下の Python スクリプトを直接呼び出す |
 | scripts/session_init.py | データディレクトリの用意、セッションの最終使用時刻の更新、スキーマ初期化、古いデータの掃除、policy.json の状態の知らせ、セッションコンテキストの出力。DB の各段は個別に失敗を受け止め、出力までは必ず進む |
 | scripts/prompt_store.py | UserPromptSubmit hook スクリプト。ユーザー発話を DB に記録し、additionalContext で prompt_id をエージェントに通知 |
-| scripts/gate_check.py | PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証、gate-ack / gate-toggle コマンドの内部処理（ack 記録・トグル操作）、天の声ゲートの per-turn additionalContext 注入 |
+| scripts/gate_check.py | PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証、gate-ack / gate-toggle コマンドの内部処理（ack 記録・トグル操作）、天の声ゲートの per-turn additionalContext 注入、絶対に止めるゲートの deny |
 | scripts/validate_policy.py | policy.json の検証 CLI（`<path>` または `-` で stdin。終了コードで結果を返す） |
 | lib/policy.py | policy.json の読み込み・検証・既定値の補完、trigger のパターン構文の解析、ack 項目を要求するゲートの引き当て |
 | lib/shell_parse.py | `command_forms`: コマンド行に含まれるすべての単純コマンドを、原文と正規化した形の組で返す。読めない入力は `OPAQUE` の 1 組にする |
@@ -140,6 +142,8 @@ gate-ack / gate-toggle コマンドは gate_check.py が PreToolUse フックで
 
 gate-toggle off は、`--prompt-id` で示したユーザー発話が直近の数件（`_INSTRUCTION_PROMPT_DISTANCE`）以内にあり、外す指示の語（off・オフ・外して・無効など）を否定なしで含み、かつゲート名か「ゲート」「gate」という語を含むときだけ受け付ける（`_verify_toggle_off`）。skill 名の「gate-off」は両方の語として扱う。エージェントが自分の判断でゲートを外せないようにするため。on には条件を付けない。トグルは session_id ごとに DB の gate_toggles に残るため、同じセッションの再開では持ち越され、`/clear` や新しいセッションでは持ち越されない。
 
+絶対に止めるゲート（block）は、発話の条件にかかわらず off を拒否する。判定は DB を開く前に行うので、トグルの記録（block にする前に off にした記録を含む）は見ない。
+
 #### hooks.json のパス解決
 
 Claude Code はプラグインの hook 実行時に `$CLAUDE_PLUGIN_ROOT` 環境変数をプラグインのインストール先ディレクトリに設定する。hooks.json ではこの変数を使って scripts/ 配下の Python スクリプトを直接呼び出す。
@@ -150,7 +154,7 @@ Claude Code はプラグインの hook 実行時に `$CLAUDE_PLUGIN_DATA` 環境
 
 #### 異常時に止める側に倒す理由
 
-policy.json の不正・DB のロック・フックの内部エラーで黙って通すと、ゲートが無効のまま作業が進む。そのため、ack を要求するゲートが関わる呼び出しでは異常を deny にする。
+policy.json の不正・DB のロック・フックの内部エラーで黙って通すと、ゲートが無効のまま作業が進む。そのため、ack を要求するゲートか絶対に止めるゲートが関わる呼び出しでは異常を deny にする。
 
 - 関わるかどうかは、policy の読み込みと照合（DB を使わない計算）で先に分かる。分からないうちに異常が起きたら止める
 - policy.json が不正なときは、どのゲートが何に掛かるか分からないため、止める範囲を広く取る。読み取り専用のツール（`_READ_ONLY_TOOLS`）は止めず、復旧の経路（policy-source.md を読む）を残す。許可済みの policy.json の書き込みも通す
@@ -386,6 +390,7 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
 | test_gate_commands.py | gate-ack・gate-toggle の拒否と受理（deny-first、最低文字数、発話の範囲、未知のオプション、`--affirm`）をフックを通して確かめる |
 | test_gate_check_affirm.py | `--affirm` のロジックと、キーワードの照合（単語・正規化・IDE や貼り付けのブロックの除外） |
 | test_auto_authorize.py | 自動通過の各条件（否定を含む）と、フックを通した自動通過 |
+| test_block_gate.py | 絶対に止めるゲートが、ack・トグル・DB の異常にかかわらず止めること、引用符の中や別のコマンドには反応しないこと、gate-toggle の off の拒否と list の表示 |
 | test_hook_safety.py | 書き換え後のコマンドが入力や policy の文字列を展開しないこと（実際に bash で実行して確かめる）、gate-toggle off の制限、ack の積み増しと失効、連結したコマンドの消費、並列の呼び出しで 1 つの ack が 1 回しか使えないこと、deny された呼び出しで天の声が発火済みにならないこと |
 | test_prompt_text.py | 発話からのブロックの除去と、システムの通知だけの発話の判定 |
 
@@ -401,6 +406,7 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
   - user-prompt-match でキーワード不一致の prompt_id を指定して ack が拒否されること
   - 「commit → push して」の後、commit を通過した push が gate-ack なしで通ること
   - gate-toggle でゲートの有効/無効が切り替わること
+  - 絶対に止めるゲートに当たるコマンドが、実行される前に止まること
 
 ---
 

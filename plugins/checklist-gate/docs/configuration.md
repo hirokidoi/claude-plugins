@@ -138,13 +138,14 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 | name | ゲートの識別名（必須。ゲート間で重複不可） |
 | description | ゲートの説明（英語推奨） |
 | trigger | トリガー条件の定義（後述） |
-| require | このゲートが要求する ack 項目名の配列。複数指定した場合、**全ての ack が揃わないとゲートを通過できない**。`[]`（空配列）にすると天の声ゲートになる（後述） |
-| message | 天の声ゲート専用。`require: []` のときのみ有効。トリガーに一致したターン最初のツール使用時に Claude へ additionalContext として注入する文字列 |
+| require | このゲートが要求する ack 項目名の配列。複数指定した場合、**全ての ack が揃わないとゲートを通過できない**。block でないゲートで `[]`（空配列）にすると天の声ゲートになる（後述） |
+| message | 天の声ゲートでは、トリガーに一致したターン最初のツール使用時に Claude へ additionalContext として注入する文字列。絶対に止めるゲートでは deny の理由。ack を要求するゲートでは使わない |
+| block | `true` にすると絶対に止めるゲートになる（後述）。省略時は `false` |
 | enabled | `true` で有効、`false` で無効 |
 
 ### 天の声ゲート（nudge gate）
 
-`require: []` かつ `message` を指定したゲートは**天の声ゲート**として動作します。deny せず、そのターン最初のトリガー一致時に `message` を additionalContext として Claude に注入します。
+`require: []` かつ `message` を指定し、block でないゲートは**天の声ゲート**として動作します。deny せず、そのターン最初のトリガー一致時に `message` を additionalContext として Claude に注入します。
 
 ```json
 {
@@ -159,6 +160,27 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 
 - LLM 呼び出しなし・ブロックなし・ack 不要で摩擦ゼロ
 - 「そのターン最初の1回だけ」注入するため、同一ターン内に Agent を複数回起動しても重複しない
+
+### 絶対に止めるゲート（block gate）
+
+`"block": true` と `message` を指定したゲートは、トリガーに一致した操作を**無条件に止めます**。`message` が deny の理由として Claude に表示されます。
+
+```json
+{
+  "name": "sudo_block",
+  "description": "sudo を使うコマンドを絶対に止める",
+  "trigger": { "patterns": ["Bash(sudo *)"], "except_patterns": [] },
+  "block": true,
+  "message": "sudo は使えません。実行が必要なら、コマンドをユーザーに示して実行を頼んでください。",
+  "enabled": true
+}
+```
+
+- gate-ack では通らない。`require` は持てず、`message` は必須（どちらも検証で弾かれる）
+- gate-toggle off では外せない（拒否される）。止めるのをやめるには、policy-source.md で無効にするか消して、apply-config で反映する
+- DB を使わずに判定するので、DB に異常があっても止まる
+- 照合は他のゲートと同じ。解析できないコマンドはすべてのパターンに当たるので、このゲートにも止められる。「シェルの解釈の限界」に挙げた形は、このゲートでも止められない
+- policy-source.md では「**種類**: 絶対に止める」と書き、「要求 ack」は書かない（同梱の設定書の sudo_block を参照）
 
 ---
 

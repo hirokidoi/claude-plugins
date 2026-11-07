@@ -64,7 +64,7 @@ class TestDefaults(unittest.TestCase):
         ))
         self.assertEqual(policy['gates'][0], {
             'name': 'g', 'description': '', 'require': [], 'enabled': True, 'message': '',
-            'trigger': {'patterns': ['Bash(ls *)'], 'except_patterns': []},
+            'block': False, 'trigger': {'patterns': ['Bash(ls *)'], 'except_patterns': []},
         })
 
     def test_explicit_values_are_kept(self):
@@ -200,6 +200,18 @@ class TestInvalidPolicies(unittest.TestCase):
             with self.subTest(key=key):
                 errors = broken(lambda p: p['ack_items']['commit_ready'].update({key: value}))
                 self.assertReports(errors, 'commit_ready', key)
+
+    def test_block_gate_rules(self):
+        sudo = lambda p: gate_of(p, 'sudo_block')
+        self.assertReports(broken(lambda p: sudo(p).update(block='yes')), 'sudo_block', '.block:')
+        self.assertReports(
+            broken(lambda p: sudo(p).update(require=['docs_checked'])), 'sudo_block', '.require:',
+        )
+        self.assertReports(broken(lambda p: sudo(p).pop('message')), 'sudo_block', '.message:')
+        self.assertReports(broken(lambda p: sudo(p).update(message=' ')), 'sudo_block', '.message:')
+
+    def test_block_false_needs_no_message(self):
+        self.assertEqual(broken(lambda p: gate_of(p, 'git_push_gate').update(block=False)), [])
 
     def test_all_problems_are_listed_at_once(self):
         def mutate(p):

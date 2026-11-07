@@ -44,11 +44,12 @@ Claude Code のセッションが開始されると、checklist-gate は自動�
 
 ## 同梱の設定例のゲート
 
-policy.json を作るまでゲートは無効です。同梱の設定書（policy-source.md）と設定例（policy.json.example）は、次の3つのゲートと、天の声ゲート（agent_nudge）を定義しています。apply-config で反映すると有効になります。
+policy.json を作るまでゲートは無効です。同梱の設定書（policy-source.md）と設定例（policy.json.example）は、次の4つのゲートと、天の声ゲート（agent_nudge）を定義しています。apply-config で反映すると有効になります。
 
 - **task_start** -- ファイル編集を始める前に、プロジェクトのドキュメント（README.md / DEVELOPMENT.md）を確認済みであることを要求する。ドキュメント自体の読み取りはゲート前でも可能
 - **git_commit_gate** -- git commit の前に、コミット準備が整っていることを要求する。コミットのたびに宣言が必要
 - **git_push_gate** -- git push の前に、ユーザーからの明示的な push 指示があることを要求する。ユーザーの発話原文をフックが機械的に検証する
+- **sudo_block** -- sudo を使うコマンドを無条件に止める。ack でもトグルでも外せない
 
 各ゲートの詳細な設定（patterns / except_patterns / ack タイプなど）は [設定リファレンス](configuration.md) を参照してください。
 
@@ -93,7 +94,7 @@ gate-ack --help-gates
 セッション中にゲートを一時的に無効化・有効化するには `checklist-gate:gate-on` / `checklist-gate:gate-off` skill を使います（skill は内部で `gate-toggle` コマンドを実行します）。
 
 ```
-gate-toggle off <ゲート名> --prompt-id <id>   # ゲートを無効化（ユーザーの指示が必要）
+gate-toggle off <ゲート名> --prompt-id <id>   # ゲートを無効化（ユーザーの指示が必要。絶対に止めるゲートは対象外）
 gate-toggle on <ゲート名>                     # OFF にしたゲートを戻す（policy.json で無効のゲートは対象外）
 gate-toggle list                             # 全ゲートの現在の状態を表示
 ```

@@ -59,6 +59,17 @@
       "enabled": true
     },
     {
+      "name": "sudo_block",
+      "description": "sudo を使うコマンドを絶対に止める",
+      "trigger": {
+        "patterns": ["Bash(sudo *)"],
+        "except_patterns": []
+      },
+      "block": true,
+      "message": "sudo は使えません。実行が必要なら、コマンドをユーザーに示して実行を頼んでください。",
+      "enabled": true
+    },
+    {
       "name": "agent_nudge",
       "description": "Agent 起動前のルールリマインダー（天の声）",
       "trigger": {

@@ -57,6 +57,14 @@
 - **要求 ack**: user_authorized_push
 - **有効**: はい
 
+### sudo_block
+- **説明**: sudo を使うコマンドを絶対に止める
+- **種類**: 絶対に止める（ack でもトグルでも外せない）
+- **patterns**: `Bash(sudo *)`
+- **except_patterns**: なし
+- **メッセージ**: sudo は使えません。実行が必要なら、コマンドをユーザーに示して実行を頼んでください。
+- **有効**: はい
+
 ### agent_nudge
 - **説明**: Agent 起動前のルールリマインダー（天の声）
 - **patterns**: `Agent(*)`

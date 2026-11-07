@@ -58,6 +58,15 @@ policy-source.md に「肯定応答キーワード」セクションがある場
 | 要求 ack | require | `なし` → `[]` |
 | メッセージ | message | そのまま文字列として出力（省略時は `message` キー自体を出力しない） |
 
-`require: []` かつ `message` がある場合、そのゲートは天の声ゲート（nudge gate）として動作する。
+`require: []` かつ `message` があり、block でない場合、そのゲートは天の声ゲート（nudge gate）として動作する。
+
+### policy-source.md → policy.json の変換ルール（絶対に止めるゲート）
+
+ゲート定義の「種類」が「絶対に止める」の場合、`"block": true` ＋ `message` を持つゲートとして変換する。`require` キーは出力しない。
+
+| Markdown フィールド | policy.json フィールド | 変換ルール |
+|---|---|---|
+| 種類 | block | `絶対に止める（…）` → `true` |
+| メッセージ | message | そのまま文字列として出力（必須。deny の理由として Claude に表示される） |
 
 **重要**: 不明な点がある場合は `config/policy.json.example`（プラグインコードディレクトリ内）を Read して正確なスキーマを確認すること。

@@ -112,6 +112,7 @@ WHERE session_id = '<セッションID>';
 `checklist-gate:gate-off` skill を使う（または `gate-toggle off <ゲート名> --prompt-id <id>`）。Claude に「<ゲート名> を外して」「push のゲートを OFF にして」のように頼むと、その発話を根拠に無効化される。
 
 - セッション単位の一時的な無効化であり、`policy.json` は変更されない
+- 絶対に止めるゲート（`block: true`）は外せない。policy-source.md を直して apply-config で反映する
 - 同じセッションの再開では持ち越され、`/clear` や新しいセッションでは policy.json の状態から始まる
 - 詳細は [運用ガイド](operations.md) を参照
 

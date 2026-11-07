@@ -423,7 +423,14 @@ def _handle_gate_toggle(args: list, session_id: str, state: State) -> str:
                 error=True,
             )
         enabled = subcmd == 'on'
-        if enabled and not next(g for g in gates if g['name'] == gate_name)['enabled']:
+        gate = next(g for g in gates if g['name'] == gate_name)
+        if not enabled and gate['block']:
+            return _shell_message(
+                f'[gate-toggle] Rejected: {gate_name} is a block gate, so it cannot be turned off '
+                f'for a session. Only the user can change it, in policy-source.md.',
+                error=True,
+            )
+        if enabled and not gate['enabled']:
             return _shell_message(
                 f'[gate-toggle] Rejected: {gate_name} is disabled in policy.json, so it cannot be '
                 f'turned on for a session. Enable it in policy-source.md and run apply-config.',
@@ -443,7 +450,10 @@ def _handle_gate_toggle(args: list, session_id: str, state: State) -> str:
         lines = [f'[gate-toggle] Gate states for session {session_id}:']
         for gate in gates:
             name = gate['name']
-            if name in toggle_map:
+            if gate['block'] and gate['enabled']:
+                status = 'ON'
+                label = 'block'
+            elif name in toggle_map:
                 status = 'ON' if toggle_map[name] else 'OFF'
                 label = 'toggled'
             else:
@@ -516,6 +526,8 @@ def _handle_help_gates() -> str:
         lines.append(f'    description: {gate["description"]}')
         if gate['require']:
             lines.append(f'    require: {", ".join(gate["require"])}')
+        if gate['block']:
+            lines.append('    block: cannot be acked or turned off')
 
     return _shell_message('\n'.join(lines))
 
@@ -531,6 +543,20 @@ def _deny_output(reason: str) -> dict:
             'permissionDecisionReason': reason,
         }
     }
+
+
+def _block_reason(blocking: list, unreadable: bool) -> str:
+    lines = [f'[checklist-gate: {gate["name"]} blocked] {gate["message"]}' for gate in blocking]
+    lines.append(
+        'This gate blocks the operation unconditionally: gate-ack and gate-toggle cannot lift it. '
+        'Follow the message above, and do not rewrite the command to get around the gate.'
+    )
+    if unreadable:
+        lines.append(
+            'The gate could not read the command (for example, an unclosed quote), so it was '
+            'treated as matching. If the command does not do this, rewrite it in a plainer form.'
+        )
+    return '\n'.join(lines)
 
 
 def _nudge_output(message: str) -> dict:
@@ -906,6 +932,10 @@ def _decide(ctx: dict) -> Optional[dict]:
     ]
     if not applicable:
         return None
+    blocking = [gate for gate in applicable if gate['block']]
+    if blocking:
+        unreadable = any(OPAQUE in group for group in _value_groups(tool_name, tool_input))
+        return _deny_output(_block_reason(blocking, unreadable))
     ctx['must_block'] = any(gate['require'] for gate in applicable)
 
     # --- 5. Evaluate against the DB ---

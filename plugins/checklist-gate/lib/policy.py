@@ -21,7 +21,7 @@ _ACK_KEYS = (
 _PROMPT_MATCH_ONLY_KEYS = (
     'match_keywords', 'except_keywords', 'max_prompt_distance', 'auto_authorize_after_gate',
 )
-_GATE_KEYS = ('name', 'description', 'trigger', 'require', 'enabled', 'message')
+_GATE_KEYS = ('name', 'description', 'trigger', 'require', 'enabled', 'message', 'block')
 _TRIGGER_KEYS = ('patterns', 'except_patterns')
 
 
@@ -161,8 +161,14 @@ def _validate_gate(index: int, gate: Any, ack_names: set, seen: set, errors: Lis
     for key in ('description', 'message'):
         if key in gate and not isinstance(gate[key], str):
             errors.append(f'{where}.{key}: must be a string')
-    if 'enabled' in gate and not isinstance(gate['enabled'], bool):
-        errors.append(f'{where}.enabled: must be a boolean')
+    for key in ('enabled', 'block'):
+        if key in gate and not isinstance(gate[key], bool):
+            errors.append(f'{where}.{key}: must be a boolean')
+    if gate.get('block') is True:
+        if gate.get('require'):
+            errors.append(f'{where}.require: must be empty when block is true')
+        if not _is_nonempty_str(gate.get('message')):
+            errors.append(f'{where}.message: required when block is true (it is the deny reason)')
     if 'require' in gate:
         require = gate['require']
         if not isinstance(require, list):
@@ -239,6 +245,7 @@ def _with_defaults(raw: dict) -> dict:
         gate.setdefault('require', [])
         gate.setdefault('enabled', True)
         gate.setdefault('message', '')
+        gate.setdefault('block', False)
     return policy
 
 

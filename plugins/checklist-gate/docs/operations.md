@@ -53,6 +53,7 @@ OFF は、ユーザーが外すよう頼んだときだけ受け付ける。Clau
 
 - `--prompt-id` で、外すよう頼んだユーザー発話を指定する
 - その発話が直近の数件以内にあり、「off」「オフ」「外して」「無効」などの語と、ゲート名か「ゲート」「gate」という語の両方を含み、否定されていない（「off にしないで」など）ときだけ OFF になる。例: 「git_push_gate を外して」「push のゲートを OFF にして」「gate-off」（skill 名は両方の語として扱う）
+- 絶対に止めるゲート（`block: true`）は、ユーザーの指示があっても OFF にできない（拒否される）。止めるのをやめるには policy-source.md を直して apply-config で反映する
 - ON に戻すのに条件はない。ただし policy.json で `enabled: false` のゲートは、トグルでは ON にできない（拒否される）。有効にするには policy-source.md を直して apply-config で反映する
 
 ### スコープ
@@ -68,10 +69,12 @@ OFF は、ユーザーが外すよう頼んだときだけ受け付ける。Clau
   task_start: ON (default)
   git_commit_gate: OFF (toggled)
   git_push_gate: ON (default)
+  sudo_block: ON (block)
 ```
 
 - `(default)` -- policy.json の設定どおり
 - `(toggled)` -- セッション中に手動で切り替えた状態
+- `(block)` -- 絶対に止めるゲート。トグルの影響を受けない
 
 ---
 
