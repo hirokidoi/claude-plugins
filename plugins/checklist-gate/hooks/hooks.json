@@ -25,7 +25,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/scripts/gate_check.py\""
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/scripts/gate_check.py\"",
+            "timeout": 30,
+            "onFailure": "block"
           }
         ]
       }

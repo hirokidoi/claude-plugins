@@ -13,6 +13,6 @@ description: This skill should be used when the user asks to "ゲートの設定
 
 ## 注意
 
-- `policy.json` を直接編集しないこと
+- `policy.json` を直接編集しないこと。フックが policy.json への書き込みを守っており、apply-config をユーザーが依頼したときだけ書ける
 - 編集後は `checklist-gate:apply-config` skill で JSON に変換して反映する
 - `policy-source.md` と `policy.json` のパスは SessionStart の additionalContext で注入される。ハードコードされたパスではなく、注入されたパスを使用すること

@@ -41,7 +41,7 @@
    gate-ack user_authorized_push --prompt-id 42 --reason "ユーザー発話を受信"
    ```
 3. **deny-first チェックで拒否される**: 対応するゲート（git_push_gate）の deny が記録されていないため、ack が受け付けられない
-4. エラーメッセージ: `[gate-ack] Error: no prior deny for gate(s) 'git_push_gate'. ack is only accepted after a deny.`
+4. エラーメッセージ: `[gate-ack] Rejected: no prior deny for gate(s) 'git_push_gate'. ...`（全文は「エラーメッセージと対処方法」を参照）
 5. Claude は実際に `git push` を試みて deny を受けてから、改めて ack を宣言する必要がある
 
 ### ポイント
@@ -152,6 +152,7 @@ task_start ゲートは gate トリガーで動作する。patterns に指定さ
 - `docs_checked` は session 型のため、セッション中に1回 ack すれば以降は不要
 - DEVELOPMENT.md が存在する場合はそちらも確認すること
 - README.md / DEVELOPMENT.md を対象にした Read・Glob・Bash（`cat README.md` など）は `except_patterns` により ack 不要で実行できる
+- Bash はパイプの後ろや `$(…)` の中のコマンドも別々に判定される。`cat README.md | head` は `cat README.md` が除外に当たっても、`head` が除外に当たらないためゲートがかかる。コミットメッセージを `$(cat <<'EOF' … EOF)` で渡す場合も、中の `cat` にゲートがかかる
 
 ### C-2: docs が存在しない場合
 
@@ -246,6 +247,20 @@ This is an opportunity to reconsider.
 Retry the operation and follow the deny message to reflect on your action.
 ```
 → まず操作を実行して deny を受けてから ack を宣言してください。
+
+**未知のオプション・引数の過不足:**
+```
+[gate-ack] Error: unknown option "--session-id"
+[gate-ack] Error: exactly one item is expected, got 2
+```
+→ オプションを外す、項目を 1 つにして再実行してください。gate-toggle も同じ形式で拒否されます。
+
+**policy.json の不正・未作成:**
+```
+[gate-ack] Error: policy.json is invalid:
+  - <不正の箇所>
+```
+→ ユーザーに apply-config の実行を依頼してください。未作成のときは `policy.json not found` と表示されます。
 
 **キーワード検証失敗（user-prompt-match）:**
 ```

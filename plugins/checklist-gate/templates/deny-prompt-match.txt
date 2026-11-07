@@ -1,0 +1,7 @@
+For user-prompt-match ack items, you MUST specify --prompt-id with the prompt_id notified by [checklist-gate: prompt_id=NN]:
+  gate-ack <item> --prompt-id <id> --reason "<justification>"
+The hook verifies that the referenced user prompt actually contains the required keywords.
+Do NOT guess or fabricate a prompt_id — use only the value from the [checklist-gate: prompt_id=NN] notification.
+If the user prompt is an affirmative response (e.g. OK, yes) to an AI question, use --affirm with a quote of the AI question:
+  gate-ack <item> --prompt-id <id> --affirm "<AI question quote>" --reason "<justification>"
+The hook checks that the --affirm value contains the required keywords and that the user prompt matches affirm_keywords.

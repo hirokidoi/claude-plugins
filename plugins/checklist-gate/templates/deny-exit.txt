@@ -1,0 +1,2 @@
+If the prerequisite is genuinely absent (e.g., the file does not exist), you can ack with that fact:
+{exit_commands}

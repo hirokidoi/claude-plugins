@@ -15,11 +15,13 @@ SQLite（WAL モード）で動作する。通常の `sqlite3` コマンドで�
 ### セッション一覧
 
 ```sql
-SELECT session_id, started_at, cwd
+SELECT session_id, started_at, last_active_at, cwd
 FROM sessions
-ORDER BY started_at DESC
+ORDER BY COALESCE(last_active_at, started_at) DESC
 LIMIT 20;
 ```
+
+`last_active_at` はセッション開始（再開を含む）と発話の記録で更新される。古いデータの掃除はこの時刻を基準にする。
 
 ### 特定セッションの ack 履歴
 
@@ -110,7 +112,7 @@ WHERE session_id = '<セッションID>';
 `checklist-gate:gate-off` skill を使う（または `gate-toggle off <ゲート名> --prompt-id <id>`）。Claude に「<ゲート名> を外して」「push のゲートを OFF にして」のように頼むと、その発話を根拠に無効化される。
 
 - セッション単位の一時的な無効化であり、`policy.json` は変更されない
-- 新しいセッションでは policy.json の状態から始まる
+- 同じセッションの再開では持ち越され、`/clear` や新しいセッションでは policy.json の状態から始まる
 - 詳細は [運用ガイド](operations.md) を参照
 
 ### deny が出たが理由が不明
@@ -131,17 +133,35 @@ rm $CLAUDE_PLUGIN_DATA/checklist-gate.sqlite*
 - 次回セッション開始時に自動的に再作成される
 - 全セッションの履歴・ack 記録が失われるため注意
 
-### hook がエラーで動かない
+### ほとんどのツールが止まる（policy.json が不正）
 
-以下を順に確認する:
+policy.json が不正なとき、読み取り専用のツールと、apply-config による policy.json の書き込み以外はすべて止まる。deny のメッセージとセッション開始の知らせに不正の箇所が表示される。
 
-1. **stderr のログを確認する** -- hook のエラーメッセージが stderr に出力される
-2. **policy.json の書式をチェックする** -- JSON の構文エラーがないか確認する。checklist-gate:apply-config skill 経由で再反映するのが最も確実
-3. **policy.json が存在するか確認する** -- `$CLAUDE_PLUGIN_DATA/policy.json` が正しい場所にあるか確認する。未作成の場合は `checklist-gate:edit-config` → `checklist-gate:apply-config` skill で生成する
+1. **不正の箇所を読む** -- 未知のキー（綴り違い）、型の誤り、存在しない ack 項目の参照などが示される
+2. **直す** -- Claude に「設定を反映して」と依頼する（checklist-gate:apply-config skill が policy-source.md から作り直す）。policy-source.md が原因なら先に直す
+3. **手で直した場合は検証する** -- `python3 <プラグインのパス>/scripts/validate_policy.py $CLAUDE_PLUGIN_DATA/policy.json` が `OK` を返すことを確かめる
+
+### 内部エラーで止まった
+
+DB のロックやフックの内部エラーが起きたとき、ack を要求するゲートが関わる操作は止まり、「再試行して」というメッセージが出る。同じ操作を再試行すれば通るのが通常。繰り返し止まるときは次を確認する。
+
+1. **stderr のログを確認する** -- フックのエラーメッセージが出力される
+2. **DB が壊れていないか確認する** -- 壊れているときは上の「DB をリセットしたい」を行う
+3. **Python のバージョンを確認する** -- フックは `python3` で起動される。3.9 以上であること
+
+天の声ゲートだけが関わる操作と、どのゲートも関わらない操作は、内部エラーが起きても止まらない。
+
+### policy.json が無いとき
+
+ゲートは開いたままで、セッションの最初に未作成の知らせが出る。`checklist-gate:edit-config` → `checklist-gate:apply-config` skill で生成する。
+
+### フックの失敗を止める側に倒す設定（onFailure）
+
+PreToolUse のフックには、起動の失敗・時間切れ・想定外の終了を止める側に倒す設定（`onFailure: block`）を付けている。この設定は対応した版の Claude Code でだけ効き、古い版では無視されて通る。スクリプト内の異常を止める判断は版によらず効く。
 
 ### セッション再開時の挙動
 
 - **session 型の ack**（例: `docs_checked`） -- セッション中は維持される。新しいセッションでは再度 ack が必要
 - **consumable 型の ack**（例: `commit_ready`） -- 使用（消費）済みの ack は再利用できない。同じ操作を再度行う場合は、新たに ack を宣言する必要がある
 - **user-prompt-match 型の ack**（例: `user_authorized_push`） -- consumable と同様に消費型。加えて、ユーザー発話の prompt_id によるキーワード検証が毎回行われる
-- **ランタイムトグル** -- 新しいセッションでは policy.json のデフォルト状態から開始される
+- **ランタイムトグル** -- 同じセッションの再開では持ち越される。`/clear` や新しいセッションでは policy.json の状態から開始される

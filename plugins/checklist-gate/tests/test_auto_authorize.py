@@ -1,17 +1,11 @@
 """Unit and hook-level tests for auto-authorization of user-prompt-match acks."""
-import json
-import os
-import subprocess
-import sys
-import tempfile
 import unittest
 
-PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, 'lib'))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, 'scripts'))
-
-from state import State
+from tests.hook_harness import (
+    HookTestCase, SESSION, assert_context, assert_denied, assert_passed_silently,
+)
 from gate_check import _find_auto_authorization
+from state import State
 
 _PUSH_CFG = {
     'type': 'user-prompt-match',
@@ -22,31 +16,6 @@ _PUSH_CFG = {
     'auto_authorize_after_gate': 'git_commit_gate',
 }
 
-_POLICY = {
-    'ack_items': {
-        'review_done': {'type': 'consumable', 'min_reason_length': 10},
-        'user_authorized_push': _PUSH_CFG,
-    },
-    'gates': [
-        {
-            'name': 'git_commit_gate',
-            'trigger': {'patterns': ['Bash(git commit *)'], 'except_patterns': []},
-            'require': ['review_done'],
-            'enabled': True,
-        },
-        {
-            'name': 'git_push_gate',
-            'trigger': {
-                'patterns': ['Bash(git push *)'],
-                'except_patterns': ['Bash(git push --dry-run *)'],
-            },
-            'require': ['user_authorized_push'],
-            'enabled': True,
-        },
-    ],
-}
-
-SESSION = 'sess-1'
 ITEM = 'user_authorized_push'
 
 
@@ -55,7 +24,7 @@ class TestFindAutoAuthorization(unittest.TestCase):
     def setUp(self) -> None:
         self.state = State(':memory:')
         self.state.init_schema()
-        self.state.start_session(SESSION, '/repo')
+        self.state.touch_session(SESSION, '/repo')
 
     def tearDown(self) -> None:
         self.state.close()
@@ -91,7 +60,7 @@ class TestFindAutoAuthorization(unittest.TestCase):
         self.assertEqual(self._find(), pid)
 
     def test_disabled_without_after_gate(self):
-        cfg = {k: v for k, v in _PUSH_CFG.items() if k != 'auto_authorize_after_gate'}
+        cfg = {**_PUSH_CFG, 'auto_authorize_after_gate': None}
         self._prompt('commit -> push して')
         self._commit_passed_now()
         self.assertIsNone(self._find(cfg))
@@ -109,7 +78,8 @@ class TestFindAutoAuthorization(unittest.TestCase):
     def test_prompt_used_once(self):
         pid = self._prompt('commit -> push して')
         self._commit_passed_now()
-        self.state.add_ack(SESSION, ITEM, 'used', prompt_id=pid)
+        self.state.add_ack_if_allowed(SESSION, ITEM, 'used', prompt_id=pid)
+        self.state.consume_acks(SESSION, [ITEM])
         self.assertIsNone(self._find())
 
     def test_newest_mention_excepted_blocks_older(self):
@@ -158,64 +128,36 @@ class TestFindAutoAuthorization(unittest.TestCase):
         self.assertIsNone(self._find())
 
 
-class TestHookFlow(unittest.TestCase):
-    """Run gate_check.py as the PreToolUse hook does."""
-
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.data_dir = self._tmp.name
-        with open(os.path.join(self.data_dir, 'policy.json'), 'w', encoding='utf-8') as f:
-            json.dump(_POLICY, f)
-        self.state = State(os.path.join(self.data_dir, 'checklist-gate.sqlite'))
-        self.state.init_schema()
-        self.state.start_session(SESSION, '/repo')
-
-    def tearDown(self) -> None:
-        self.state.close()
-        self._tmp.cleanup()
-
-    def _run(self, command: str) -> dict:
-        hook_input = {
-            'session_id': SESSION,
-            'tool_name': 'Bash',
-            'tool_input': {'command': command},
-        }
-        result = subprocess.run(
-            [sys.executable, os.path.join(PLUGIN_DIR, 'scripts', 'gate_check.py')],
-            input=json.dumps(hook_input),
-            capture_output=True,
-            text=True,
-            env={**os.environ, 'CLAUDE_PLUGIN_DATA': self.data_dir},
-            check=True,
-        )
-        output = json.loads(result.stdout) if result.stdout.strip() else {}
-        return output.get('hookSpecificOutput', {})
+class TestHookFlow(HookTestCase):
+    """Run gate_check.py as the PreToolUse hook does, with the bundled example policy."""
 
     def _review_done(self) -> None:
-        self.state.add_ack(SESSION, 'review_done', 'review passed')
+        self.state.add_ack_if_allowed(SESSION, 'commit_ready', 'review passed')
 
     def test_commit_then_push_without_ack(self):
-        pid = self.state.add_user_prompt(SESSION, 'commit -> push して')
+        pid = self.add_prompt('commit -> push して')
         self._review_done()
-        self.assertNotEqual(self._run('git commit -m x').get('permissionDecision'), 'deny')
-        out = self._run('git push origin master')
-        self.assertNotEqual(out.get('permissionDecision'), 'deny')
-        self.assertIn(f'prompt_id={pid}', out.get('additionalContext', ''))
-        self.assertEqual(self._run('git push origin master').get('permissionDecision'), 'deny')
+        assert_passed_silently(self.gate('git commit -m x'))
+        result = self.gate('git push origin master')
+        assert_context(result, f'prompt_id={pid}')
+        assert_context(result, 'auto-authorized')
+        assert_denied(self.gate('git push origin master'))
 
     def test_chained_commit_and_push(self):
-        self.state.add_user_prompt(SESSION, 'commit して push まで')
+        pid = self.add_prompt('commit して push まで')
         self._review_done()
-        out = self._run('git commit -m x && git push')
-        self.assertNotEqual(out.get('permissionDecision'), 'deny')
+        result = self.gate('git commit -m x && git push')
+        assert_context(result, 'auto-authorized')
+        assert_context(result, f'prompt_id={pid}')
+        self.assertFalse(self.state.has_unconsumed_ack(SESSION, 'commit_ready'))
 
     def test_push_without_commit_is_denied(self):
-        self.state.add_user_prompt(SESSION, 'push して')
-        self.assertEqual(self._run('git push').get('permissionDecision'), 'deny')
+        self.add_prompt('push して')
+        assert_denied(self.gate('git push'))
 
     def test_stash_push_is_not_gated(self):
-        self.state.add_user_prompt(SESSION, 'stash して')
-        self.assertEqual(self._run('git stash push app/models/user.rb'), {})
+        self.add_prompt('stash して')
+        assert_passed_silently(self.gate('git stash push app/models/user.rb'))
 
 
 if __name__ == '__main__':

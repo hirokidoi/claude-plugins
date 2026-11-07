@@ -8,36 +8,34 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
+
+BUSY_TIMEOUT_SECONDS = 5.0
+
+# Retention in days per table; sessions are kept for the longest of them.
+_RETENTION_DAYS = {
+    'user_prompts': 7,
+    'gate_toggles': 7,
+    'gate_denies': 7,
+    'nudge_firings': 7,
+    'gate_passes': 7,
+    'session_checks': 30,
+    'acks': 30,
+}
+# Time column used to age out rows whose session row is gone.
+_ORPHAN_TIME_COLUMN = {
+    'user_prompts': 'created_at',
+    'gate_toggles': 'updated_at',
+    'gate_denies': 'created_at',
+    'session_checks': 'checked_at',
+    'acks': 'created_at',
+}
+_MIGRATIONS = (
+    ('acks', 'prompt_id', 'INTEGER'),
+    ('sessions', 'last_active_at', 'TEXT'),
+)
 
 # --- Dataclasses ---
-
-
-@dataclass
-class Session:
-    session_id: str
-    started_at: str
-    cwd: str
-
-
-@dataclass
-class SessionCheck:
-    id: int
-    session_id: str
-    item: str
-    reason: str
-    checked_at: str
-
-
-@dataclass
-class Ack:
-    id: int
-    session_id: str
-    item: str
-    reason: str
-    created_at: str
-    consumed_at: Optional[str]
-    prompt_id: Optional[int] = None
 
 
 @dataclass
@@ -45,13 +43,6 @@ class UserPrompt:
     id: int
     session_id: str
     prompt: str
-    created_at: str
-
-
-@dataclass
-class GateDeny:
-    session_id: str
-    gate_name: str
     created_at: str
 
 
@@ -70,7 +61,8 @@ _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
     started_at TEXT NOT NULL,
-    cwd        TEXT NOT NULL
+    cwd        TEXT NOT NULL,
+    last_active_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS session_checks (
@@ -150,7 +142,7 @@ class State:
     Gate evaluation logic belongs in the caller (gate_check.py), NOT here.
     """
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(self, db_path: Optional[str] = None) -> None:
         if db_path is None:
             db_path = os.path.join(
                 os.environ['CLAUDE_PLUGIN_DATA'], 'checklist-gate.sqlite'
@@ -163,7 +155,7 @@ class State:
             db_dir = os.path.dirname(self._db_path)
             if db_dir:
                 os.makedirs(db_dir, exist_ok=True)
-            self._conn = sqlite3.connect(self._db_path)
+            self._conn = sqlite3.connect(self._db_path, timeout=BUSY_TIMEOUT_SECONDS)
             self._conn.execute('PRAGMA journal_mode=WAL')
             self._conn.execute('PRAGMA foreign_keys=ON')
             self._conn.row_factory = sqlite3.Row
@@ -178,7 +170,7 @@ class State:
     def transaction(self):
         """Explicit transaction boundary for atomic multi-step operations."""
         conn = self._get_conn()
-        conn.execute('BEGIN')
+        conn.execute('BEGIN IMMEDIATE')
         try:
             yield conn
             conn.commit()
@@ -190,11 +182,18 @@ class State:
         """Create all tables if they don't exist."""
         conn = self._get_conn()
         conn.executescript(_SCHEMA_SQL)
-        # Migration: add prompt_id column for existing databases
-        try:
-            conn.execute('ALTER TABLE acks ADD COLUMN prompt_id INTEGER')
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+        for table, column, decl in _MIGRATIONS:
+            if not self._has_column(table, column):
+                self._add_column(table, column, decl)
+
+    def _has_column(self, table: str, column: str) -> bool:
+        rows = self._get_conn().execute(f'PRAGMA table_info({table})').fetchall()
+        return any(row['name'] == column for row in rows)
+
+    def _add_column(self, table: str, column: str, decl: str) -> None:
+        with self.transaction() as conn:
+            if not self._has_column(table, column):
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {decl}')
 
     # --- helpers ---
 
@@ -205,14 +204,19 @@ class State:
 
     # --- Session operations ---
 
-    def start_session(self, session_id: str, cwd: str) -> None:
-        """Insert a new session into the sessions table."""
-        conn = self._get_conn()
-        conn.execute(
-            'INSERT INTO sessions (session_id, started_at, cwd) VALUES (?, ?, ?)',
-            (session_id, self._now(), cwd),
-        )
-        conn.commit()
+    def touch_session(self, session_id: str, cwd: str) -> None:
+        """Create the session row if missing and mark it active now."""
+        now = self._now()
+        with self.transaction() as conn:
+            conn.execute(
+                'INSERT OR IGNORE INTO sessions (session_id, started_at, cwd, last_active_at)'
+                ' VALUES (?, ?, ?, ?)',
+                (session_id, now, cwd, now),
+            )
+            conn.execute(
+                'UPDATE sessions SET last_active_at = ? WHERE session_id = ?',
+                (now, session_id),
+            )
 
     # --- SessionCheck operations (persistent ack) ---
 
@@ -238,19 +242,6 @@ class State:
         return row is not None
 
     # --- Ack operations (consumable ack) ---
-
-    def add_ack(
-        self, session_id: str, item: str, reason: str,
-        prompt_id: Optional[int] = None,
-    ) -> None:
-        """Add a new unconsumed ack."""
-        conn = self._get_conn()
-        conn.execute(
-            'INSERT INTO acks (session_id, item, reason, created_at, prompt_id)'
-            ' VALUES (?, ?, ?, ?, ?)',
-            (session_id, item, reason, self._now(), prompt_id),
-        )
-        conn.commit()
 
     def add_ack_if_allowed(
         self, session_id: str, item: str, reason: str,
@@ -294,63 +285,6 @@ class State:
         ).fetchone()
         return row is not None
 
-    def get_oldest_unconsumed_ack(
-        self, session_id: str, item: str
-    ) -> Optional[Ack]:
-        """Return the oldest unconsumed ack without consuming it."""
-        conn = self._get_conn()
-        row = conn.execute(
-            'SELECT id, session_id, item, reason, created_at, consumed_at, prompt_id '
-            'FROM acks '
-            'WHERE session_id = ? AND item = ? AND consumed_at IS NULL '
-            'ORDER BY created_at ASC LIMIT 1',
-            (session_id, item),
-        ).fetchone()
-        if row is None:
-            return None
-        return Ack(
-            id=row['id'],
-            session_id=row['session_id'],
-            item=row['item'],
-            reason=row['reason'],
-            created_at=row['created_at'],
-            consumed_at=row['consumed_at'],
-            prompt_id=row['prompt_id'],
-        )
-
-    def consume_oldest_unconsumed_ack(
-        self, session_id: str, item: str
-    ) -> Optional[Ack]:
-        """Consume the oldest unconsumed ack (FIFO) within a transaction.
-
-        Returns:
-            The consumed Ack, or None if no unconsumed ack exists.
-        """
-        with self.transaction() as conn:
-            row = conn.execute(
-                'SELECT id, session_id, item, reason, created_at, consumed_at, prompt_id '
-                'FROM acks '
-                'WHERE session_id = ? AND item = ? AND consumed_at IS NULL '
-                'ORDER BY created_at ASC LIMIT 1',
-                (session_id, item),
-            ).fetchone()
-            if row is None:
-                return None
-            now = self._now()
-            conn.execute(
-                'UPDATE acks SET consumed_at = ? WHERE id = ?',
-                (now, row['id']),
-            )
-            return Ack(
-                id=row['id'],
-                session_id=row['session_id'],
-                item=row['item'],
-                reason=row['reason'],
-                created_at=row['created_at'],
-                consumed_at=now,
-                prompt_id=row['prompt_id'],
-            )
-
     def consume_acks(
         self, session_id: str, items: List[str],
         grants: Optional[List[tuple]] = None,
@@ -373,7 +307,7 @@ class State:
             for item in items:
                 rows = conn.execute(
                     'SELECT id FROM acks WHERE session_id = ? AND item = ? AND consumed_at IS NULL '
-                    'ORDER BY created_at ASC, id ASC',
+                    'ORDER BY id ASC',
                     (session_id, item),
                 ).fetchall()
                 ack_id = next((r['id'] for r in rows if r['id'] not in chosen), None)
@@ -399,14 +333,23 @@ class State:
     # --- UserPrompt operations ---
 
     def add_user_prompt(self, session_id: str, prompt: str) -> int:
-        """Insert a user prompt and return its id (prompt_id)."""
-        conn = self._get_conn()
-        cursor = conn.execute(
-            'INSERT INTO user_prompts (session_id, prompt, created_at) VALUES (?, ?, ?)',
-            (session_id, prompt, self._now()),
-        )
-        conn.commit()
-        return cursor.lastrowid
+        """Insert a user prompt, mark the session active, and return the prompt id."""
+        now = self._now()
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                'INSERT INTO user_prompts (session_id, prompt, created_at) VALUES (?, ?, ?)',
+                (session_id, prompt, now),
+            )
+            conn.execute(
+                'INSERT OR IGNORE INTO sessions (session_id, started_at, cwd, last_active_at)'
+                " VALUES (?, ?, '', ?)",
+                (session_id, now, now),
+            )
+            conn.execute(
+                'UPDATE sessions SET last_active_at = ? WHERE session_id = ?',
+                (now, session_id),
+            )
+            return cursor.lastrowid
 
     def get_user_prompt(self, prompt_id: int, session_id: str) -> Optional[UserPrompt]:
         """Return a user prompt by id, scoped to session_id."""
@@ -424,34 +367,6 @@ class State:
             prompt=row['prompt'],
             created_at=row['created_at'],
         )
-
-    def is_prompt_within_distance(
-        self, prompt_id: int, session_id: str, max_distance: int
-    ) -> bool:
-        """Check if prompt_id is within the last max_distance prompts for the session."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            'SELECT id FROM user_prompts WHERE session_id = ? ORDER BY id DESC LIMIT ?',
-            (session_id, max_distance),
-        ).fetchall()
-        recent_ids = {row['id'] for row in rows}
-        return prompt_id in recent_ids
-
-    def get_oldest_valid_prompt_id(
-        self, session_id: str, max_distance: int
-    ) -> Optional[int]:
-        """Return the oldest prompt_id within the last max_distance prompts.
-
-        Returns None if the session has no user_prompts.
-        """
-        conn = self._get_conn()
-        rows = conn.execute(
-            'SELECT id FROM user_prompts WHERE session_id = ? ORDER BY id DESC LIMIT ?',
-            (session_id, max_distance),
-        ).fetchall()
-        if not rows:
-            return None
-        return min(row['id'] for row in rows)
 
     def get_recent_prompts(self, session_id: str, limit: int) -> List[UserPrompt]:
         """Return the last `limit` prompts of the session, newest first."""
@@ -479,6 +394,19 @@ class State:
             (session_id, item, prompt_id),
         ).fetchone()
         return row is not None
+
+    def expire_prompt_acks_before(
+        self, session_id: str, item: str, oldest_valid_prompt_id: Optional[int]
+    ) -> None:
+        """Mark unconsumed acks of prompts older than the given id as used (None: all of them)."""
+        conn = self._get_conn()
+        conn.execute(
+            'UPDATE acks SET consumed_at = ? WHERE session_id = ? AND item = ? '
+            'AND consumed_at IS NULL AND prompt_id IS NOT NULL '
+            'AND (? IS NULL OR prompt_id < ?)',
+            (self._now(), session_id, item, oldest_valid_prompt_id, oldest_valid_prompt_id),
+        )
+        conn.commit()
 
     # --- GateDeny operations ---
 
@@ -509,14 +437,6 @@ class State:
             (session_id, gate_name),
         )
         conn.commit()
-
-    def find_gates_requiring_item(self, item: str, gates: list) -> list:
-        """Return gate names from the gates list that require the given ack item."""
-        return [
-            g.get('name', '')
-            for g in gates
-            if item in g.get('require', [])
-        ]
 
     # --- GateToggle operations ---
 
@@ -562,121 +482,6 @@ class State:
             for row in rows
         ]
 
-    def cleanup_old_gate_toggles(self, keep_days: int = 7) -> int:
-        """Delete gate_toggles belonging to sessions started more than keep_days ago.
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=keep_days)
-        ).isoformat()
-        cursor = conn.execute(
-            'DELETE FROM gate_toggles WHERE session_id IN '
-            '(SELECT session_id FROM sessions WHERE started_at < ?)',
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
-
-    def cleanup_old_session_checks(self, keep_days: int = 30) -> int:
-        """Delete session_checks belonging to sessions started more than keep_days ago.
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=keep_days)
-        ).isoformat()
-        cursor = conn.execute(
-            'DELETE FROM session_checks WHERE session_id IN '
-            '(SELECT session_id FROM sessions WHERE started_at < ?)',
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
-
-    def cleanup_old_acks(self, keep_days: int = 30) -> int:
-        """Delete acks belonging to sessions started more than keep_days ago.
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=keep_days)
-        ).isoformat()
-        cursor = conn.execute(
-            'DELETE FROM acks WHERE session_id IN '
-            '(SELECT session_id FROM sessions WHERE started_at < ?)',
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
-
-    def cleanup_old_user_prompts(self, keep_days: int = 7) -> int:
-        """Delete user_prompts belonging to sessions started more than keep_days ago.
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=keep_days)
-        ).isoformat()
-        cursor = conn.execute(
-            'DELETE FROM user_prompts WHERE session_id IN '
-            '(SELECT session_id FROM sessions WHERE started_at < ?)',
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
-
-    def cleanup_old_gate_denies(self, keep_days: int = 7) -> int:
-        """Delete gate_denies belonging to sessions started more than keep_days ago.
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=keep_days)
-        ).isoformat()
-        cursor = conn.execute(
-            'DELETE FROM gate_denies WHERE session_id IN '
-            '(SELECT session_id FROM sessions WHERE started_at < ?)',
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
-
-    def cleanup_old_sessions(self, keep_days: int = 30) -> int:
-        """Delete sessions started more than keep_days ago.
-
-        Call after cleaning up child tables (session_checks, acks, gate_toggles).
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cutoff = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(days=keep_days)
-        ).isoformat()
-        cursor = conn.execute(
-            'DELETE FROM sessions WHERE started_at < ?',
-            (cutoff,),
-        )
-        conn.commit()
-        return cursor.rowcount
-
     # --- NudgeFiring operations ---
 
     def get_latest_prompt_id(self, session_id: str) -> Optional[int]:
@@ -718,22 +523,6 @@ class State:
         )
         conn.commit()
 
-    def cleanup_nudge_firings_for_old_sessions(self) -> int:
-        """Delete nudge_firings whose session no longer exists.
-
-        Call after cleanup_old_sessions.
-
-        Returns:
-            Number of deleted rows.
-        """
-        conn = self._get_conn()
-        cursor = conn.execute(
-            'DELETE FROM nudge_firings WHERE session_id NOT IN'
-            ' (SELECT session_id FROM sessions)'
-        )
-        conn.commit()
-        return cursor.rowcount
-
     # --- GatePass operations ---
 
     def record_gate_pass(self, session_id: str, gate_name: str, prompt_id: int) -> None:
@@ -755,12 +544,42 @@ class State:
         ).fetchone()
         return row['prompt_id'] if row else None
 
-    def cleanup_gate_passes_for_old_sessions(self) -> int:
-        """Delete gate_passes whose session no longer exists. Call after cleanup_old_sessions."""
-        conn = self._get_conn()
-        cursor = conn.execute(
-            'DELETE FROM gate_passes WHERE session_id NOT IN'
-            ' (SELECT session_id FROM sessions)'
-        )
-        conn.commit()
-        return cursor.rowcount
+    # --- Housekeeping ---
+
+    def cleanup(self, now: Optional[datetime.datetime] = None) -> Dict[str, int]:
+        """Delete aged-out rows in one transaction; returns deleted counts per table."""
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+
+        def cutoff(days: int) -> str:
+            return (now - datetime.timedelta(days=days)).isoformat()
+
+        last_active = 'COALESCE(last_active_at, started_at)'
+        deleted: Dict[str, int] = {}
+        with self.transaction() as conn:
+            for table, days in _RETENTION_DAYS.items():
+                deleted[table] = conn.execute(
+                    f'DELETE FROM {table} WHERE session_id IN '
+                    f'(SELECT session_id FROM sessions WHERE {last_active} < ?)',
+                    (cutoff(days),),
+                ).rowcount
+            for table, days in _RETENTION_DAYS.items():
+                column = _ORPHAN_TIME_COLUMN.get(table)
+                if column:
+                    sql = (
+                        f'DELETE FROM {table} WHERE {column} < ? '
+                        'AND session_id NOT IN (SELECT session_id FROM sessions)'
+                    )
+                    params: tuple = (cutoff(days),)
+                else:
+                    sql = (
+                        f'DELETE FROM {table} WHERE session_id NOT IN '
+                        '(SELECT session_id FROM sessions) AND session_id NOT IN '
+                        '(SELECT session_id FROM user_prompts)'
+                    )
+                    params = ()
+                deleted[table] += conn.execute(sql, params).rowcount
+            deleted['sessions'] = conn.execute(
+                f'DELETE FROM sessions WHERE {last_active} < ?',
+                (cutoff(max(_RETENTION_DAYS.values())),),
+            ).rowcount
+        return deleted

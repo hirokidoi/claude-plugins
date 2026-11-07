@@ -10,12 +10,14 @@ description: This skill should be used when the user asks to "ゲート設定を
 1. SessionStart で注入されたパス情報から `policy-source.md` のパスを確認し、Read で読み込む
 2. `config/policy.json.example`（プラグインコードディレクトリ内）を参照スキーマとして読み込む
 3. Markdown の内容を policy.json.example と同一のスキーマで JSON に変換する
-4. スキーマ検証を行う（下記「必須スキーマ仕様」参照）
-5. 既存の `policy.json` との diff を表示する
-6. ユーザーの承認を得てから SessionStart で注入されたパスに書き込む
-7. 次回 SessionStart から有効になる旨を伝える
+4. 検証スクリプトに変換結果を stdin で渡して検証する。`<plugin_root>` は SessionStart で注入されたパス（`python3 "<plugin_root>/scripts/validate_policy.py" - <<'EOF'` の後に JSON を置き、`EOF` で閉じる）。`OK` が出るまで、表示された不正の箇所を直して再検証する
+5. 現在の `policy.json` との diff を表示する
+6. ユーザーの承認を得てから、Write で SessionStart で注入されたパスに書き込む（フックが、直近の依頼と内容の検証を確かめる）
+7. 書き込んだ直後から有効になる旨を伝える
 
 **重要**: `policy-source.md` と `policy.json` のパスは SessionStart の additionalContext で注入される。ハードコードされたパスではなく、注入されたパスを使用すること。
+
+**policy.json が不正で検証の Bash が止められたとき**: そのまま手順 5 以降に進んでよい。Write のときにフックが同じ検証を行い、不正な内容は拒否される。
 
 ### policy-source.md → policy.json の変換ルール（affirm_keywords）
 
@@ -33,20 +35,7 @@ policy-source.md に「肯定応答キーワード」セクションがある場
 - `trigger.patterns`（`pattern` ではない）: `Tool(パターン)` 形式の文字列の配列。Claude Code の permissions と同じ記法
 - `trigger.except_patterns`（`exclude_pattern` ではない）: `Tool(パターン)` 形式の文字列の配列。除外対象を指定
 
-スキーマ検証項目:
-- `gates[].require` の ack 名が `ack_items` に存在するか（天の声ゲートは `require: []` のため対象外）
-- `trigger.patterns` が配列であるか
-- `min_reason_length` が整数か、`type` が consumable / session か
-- `affirm_keywords`（トップレベル）が文字列の配列であるか（省略可、存在する場合は空配列不可・最低1つ必要）
-
-### user-prompt-match タイプの検証項目
-
-user-prompt-match タイプの ack 項目には追加の必須フィールドがある。スキーマ検証で以下も確認すること:
-
-- `match_keywords` が文字列の配列であるか（空配列は不可、最低1つ必要）
-- `except_keywords` が文字列の配列であるか（省略時は空配列 `[]` として出力）
-- `max_prompt_distance` が正の整数であるか（省略時はデフォルト `3` として出力）
-- `auto_authorize_after_gate`（省略可）が `gates[].name` に存在するゲート名か
+検証の規則は検証スクリプトが持つ。この文書には列挙しない。
 
 ### policy-source.md → policy.json の変換ルール（user-prompt-match）
 
@@ -55,8 +44,8 @@ user-prompt-match タイプの ack 項目には追加の必須フィールドが
 | 種類 | type | `user-prompt-match（ユーザー発話検証）` → `"user-prompt-match"` |
 | 最低 reason 文字数 | min_reason_length | 数値に変換 |
 | マッチキーワード | match_keywords | バッククォートで囲まれたカンマ区切り → 文字列の配列。例: `` `push`, `プッシュ` `` → `["push", "プッシュ"]` |
-| 除外キーワード | except_keywords | 同上。省略時は `[]` |
-| 有効発話数 | max_prompt_distance | 数値に変換。省略時は `3` |
+| 除外キーワード | except_keywords | 同上。省略時はキー自体を出力しない（既定値が補われる） |
+| 有効発話数 | max_prompt_distance | 数値に変換。省略時はキー自体を出力しない（既定値が補われる） |
 | 自動通過の前提ゲート | auto_authorize_after_gate | ゲート名の文字列。省略時はキー自体を出力しない |
 | ヒント | hint | そのまま文字列として出力 |
 

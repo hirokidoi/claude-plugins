@@ -55,6 +55,26 @@ class TestIsSystemOnly(unittest.TestCase):
     def test_paste_only_is_not_system_only(self):
         self.assertFalse(is_system_only('<pasted_content id="1">log</pasted_content id="1">'))
 
+    def test_unclosed_system_tag_in_a_user_sentence_is_not_system_only(self):
+        self.assertFalse(is_system_only('<system-reminder> が混ざる件について教えて'))
+        self.assertFalse(is_system_only('<task-notification> の扱い'))
+
+    def test_unclosed_tag_after_a_closed_block_is_not_system_only(self):
+        self.assertFalse(is_system_only('<system-reminder>x</system-reminder> <task-notification> が'))
+
+    def test_empty_prompt_is_system_only(self):
+        self.assertTrue(is_system_only(''))
+        self.assertTrue(is_system_only('  \n'))
+
+
+class TestUnclosedTagsStayRemovedFromAuthoredText(unittest.TestCase):
+
+    def test_text_after_an_unclosed_system_tag_is_not_authored(self):
+        self.assertEqual(authored_text('<system-reminder> が混ざる件。push して'), '')
+
+    def test_text_before_an_unclosed_system_tag_is_kept(self):
+        self.assertEqual(authored_text('push して <system-reminder> が混ざる'), 'push して')
+
 
 if __name__ == '__main__':
     unittest.main()

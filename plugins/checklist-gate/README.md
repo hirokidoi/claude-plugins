@@ -8,7 +8,10 @@ Claude Code の操作に「確認ゲート」を設けるプラグイン。git c
 - **柔軟なゲート設定** -- gate トリガーで対象操作を定義可能。patterns / except_patterns は `Tool(パターン)` 形式で記述（Claude Code の permissions と同じ記法）
 - **Markdown ベースの設定管理** -- 設定書（policy-source.md）を編集し、skill で JSON に変換・反映
 - **セッション単位の状態管理** -- ack の有効範囲をセッション単位（1回限り）または消費型（毎回必要）で制御
-- **ランタイムでのゲート切替** -- gate-toggle コマンドでセッション中にゲートの ON/OFF を切替可能
+- **ランタイムでのゲート切替** -- `gate-on` / `gate-off` skill でセッション中にゲートの ON/OFF を切替可能
+- **異常時は止める側に倒す** -- policy.json が不正、またはフックの内部でエラーが起きたとき、ack を要求するゲートが関わる操作は止まる
+- **シェルの解釈** -- `bash -c`・`eval`・`$(…)` などの中のコマンドも照合し、引用符の中の文字列には反応しない
+- **設定ファイルの保護** -- policy.json への書き込みは、直近のユーザー発話に「設定」「反映」などの語があるときだけ通る（apply-config の依頼を想定した語の照合）
 
 ## インストール
 
@@ -22,6 +25,16 @@ Claude Code 内で以下を実行:
 インストール後、Claude Code を再起動してください。再起動後に skills と hooks が有効になります。
 
 初回セットアップとして `checklist-gate:edit-config` → `checklist-gate:apply-config` skill で `policy.json` を生成してください。詳細は [はじめに](docs/getting-started.md) を参照。
+
+## 3.0.0 の変更点（アップデート前に確認）
+
+- **policy.json を読み込み時に検証する**: 未知のキー（`except_pattern` のような綴り違いを含む）を不正として扱う。独自のキーを書いている場合は、アップデート後に不正になる。不正の箇所はセッション開始時の知らせと deny のメッセージに表示される。不正の間は、読み取り専用のツールと apply-config による policy.json の書き込み以外がすべて止まる
+- **policy.json が無い間はゲートが開いたまま**: セッション開始時に未作成の知らせが出る
+- **パイプの後ろのコマンドも照合する**: 同梱の例の task_start は、docs_checked の前の `cat README.md | head` も止める。`git commit -m "$(cat <<'EOF' … EOF)"` の `cat` も同様
+- **大文字小文字を区別しない照合**: 除外パターンにも適用される
+- **Monitor は Bash の、NotebookEdit は Edit のパターンでも照合する**
+- **gate-ack・gate-toggle の未知のオプションはエラー**: `--session-id` の指定は不要で、付けるとエラーになる
+- **Python 3.9 以上で動く**
 
 ## ドキュメント
 

@@ -1,74 +1,42 @@
 """Unit tests for --affirm logic in gate_check.py _handle_gate_ack."""
 import os
 import shlex
-import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
-# Ensure lib/ and scripts/ are importable
-PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, 'lib'))
-sys.path.insert(0, os.path.join(PLUGIN_DIR, 'scripts'))
-
-from state import State
+from tests.hook_harness import example_policy, write_policy
 from gate_check import _handle_gate_ack
-
-
-# -- Test policy used across tests --
-
-_POLICY_WITH_AFFIRM = {
-    'affirm_keywords': ['OK', 'はい', 'よい', 'いいよ', 'お願い', 'yes', 'sure'],
-    'ack_items': {
-        'user_authorized_push': {
-            'type': 'user-prompt-match',
-            'min_reason_length': 20,
-            'hint': 'push hint',
-            'match_keywords': ['push', 'プッシュ'],
-            'except_keywords': ['dry-run', 'ドライラン'],
-            'max_prompt_distance': 3,
-        }
-    },
-    'gates': [
-        {
-            'name': 'git_push_gate',
-            'description': 'Require user_authorized_push before git push',
-            'trigger': {
-                'type': 'gate',
-                'patterns': ['Bash(git push *)'],
-                'except_patterns': ['Bash(git push --dry-run *)'],
-            },
-            'require': ['user_authorized_push'],
-            'enabled': True,
-        }
-    ],
-}
+from state import State
 
 
 class _AffirmTestBase(unittest.TestCase):
-    """Base class with a fresh in-memory State and a patched _load_policy."""
+    """A fresh in-memory State and the bundled example policy in a temporary data directory."""
 
     def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        write_policy(self._tmp.name, example_policy())
+        self._env = patch.dict(os.environ, {'CLAUDE_PLUGIN_DATA': self._tmp.name})
+        self._env.start()
+
         self.state = State(':memory:')
         self.state.init_schema()
-        self.state.start_session('sess-1', '/tmp')
+        self.state.touch_session('sess-1', '/tmp')
 
         # Pre-record a deny so deny-first passes
         self.state.record_deny('sess-1', 'git_push_gate')
 
-        # Patch _load_policy to return our test policy
-        self._patcher = patch('gate_check._load_policy', return_value=_POLICY_WITH_AFFIRM)
-        self._patcher.start()
-
     def tearDown(self) -> None:
-        self._patcher.stop()
+        self._env.stop()
         self.state.close()
+        self._tmp.cleanup()
 
     # -- helpers --
 
     def _call_ack(self, command: str) -> str:
         """Parse command and call _handle_gate_ack, returning the result string."""
         tokens = shlex.split(command)
-        return _handle_gate_ack(tokens, command, 'sess-1', self.state)
+        return _handle_gate_ack(tokens[1:], 'sess-1', self.state)
 
     def _add_prompt(self, text: str) -> int:
         """Add a user prompt and return its id."""
@@ -127,7 +95,7 @@ class TestAffirmFlowRejection(_AffirmTestBase):
             f'--affirm "push しますか？" '
             f'--reason "AIの質問「push しますか？」に対しユーザーが「うーん考え中」と回答した"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_affirm_rejected_no_match_keyword_in_affirm_text(self) -> None:
         """User says 'OK', but AI asked 'commit しますか？' (no push keyword) → should reject."""
@@ -137,7 +105,7 @@ class TestAffirmFlowRejection(_AffirmTestBase):
             f'--affirm "commit しますか？" '
             f'--reason "AIの質問「commit しますか？」に対しユーザーがOKと回答したことを確認"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_affirm_rejected_except_keyword_in_affirm_text(self) -> None:
         """User says 'OK', AI asked 'dry-run で push しますか？' → except_keywords → reject."""
@@ -147,7 +115,7 @@ class TestAffirmFlowRejection(_AffirmTestBase):
             f'--affirm "dry-run で push しますか？" '
             f'--reason "AIの質問「dry-run で push しますか？」に対しユーザーがOKと回答した"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
 
 # ---- Normal flow (without --affirm): keyword check uses unified reject message ----
@@ -162,7 +130,7 @@ class TestNormalFlowKeywordReject(_AffirmTestBase):
             f'gate-ack user_authorized_push --prompt-id {pid} '
             f'--reason "ユーザー発話『マージして』を受信したが push キーワードが含まれない（prompt_id={pid}）"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_normal_flow_except_keyword_hit(self) -> None:
         """User says 'dry-run で push して' → except_keywords → reject."""
@@ -171,7 +139,7 @@ class TestNormalFlowKeywordReject(_AffirmTestBase):
             f'gate-ack user_authorized_push --prompt-id {pid} '
             f'--reason "ユーザー発話『dry-run で push して』を受信（prompt_id={pid}）"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_normal_flow_identifier_containing_push(self) -> None:
         """'web_push.md を直して' does not mention push as a word → reject."""
@@ -180,7 +148,7 @@ class TestNormalFlowKeywordReject(_AffirmTestBase):
             f'gate-ack user_authorized_push --prompt-id {pid} '
             f'--reason "ユーザー発話『web_push.md を直して』を受信（prompt_id={pid}）"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_normal_flow_push_only_in_ide_tag_or_paste(self) -> None:
         """push appears only in IDE / pasted blocks → reject."""
@@ -192,7 +160,7 @@ class TestNormalFlowKeywordReject(_AffirmTestBase):
             f'gate-ack user_authorized_push --prompt-id {pid} '
             f'--reason "ユーザー発話『commit して』を受信（prompt_id={pid}）"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_normal_flow_success_without_space(self) -> None:
         """'pushして' still mentions push as a word → should pass."""
@@ -236,7 +204,7 @@ class TestAffirmEdgeCases(_AffirmTestBase):
             f'--affirm "push しますか？" '
             f'--reason "AIの質問「push しますか？」に対しユーザーが回答したことを確認"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_affirm_with_surrounding_spaces(self) -> None:
         pid = self._add_prompt('  OK  ')
@@ -254,7 +222,7 @@ class TestAffirmEdgeCases(_AffirmTestBase):
             f'gate-ack user_authorized_push --prompt-id {pid} '
             f'--reason "ユーザー発話『commit して、push しないで』を受信（prompt_id={pid}）"'
         )
-        self.assertIn('Rejected', result)
+        self.assertIn('insufficient grounds', result)
 
     def test_same_prompt_cannot_authorize_twice(self) -> None:
         pid = self._add_prompt('push して')
