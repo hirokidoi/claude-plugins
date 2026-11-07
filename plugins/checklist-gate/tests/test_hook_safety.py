@@ -3,8 +3,8 @@ import os
 import unittest
 
 from tests.hook_harness import (
-    GATE_CHECK, HookTestCase, SESSION, assert_context, assert_denied, assert_passed_silently,
-    bash_call, example_policy, run_hooks_parallel,
+    CONFIRM_RUN, GATE_CHECK, HookTestCase, SESSION, assert_context, assert_denied,
+    assert_passed_silently, bash_call, example_policy, post_call, run_hooks_parallel,
 )
 
 # Parallel runs repeat until a non-atomic version of the code would fail them.
@@ -149,7 +149,8 @@ class TestCommitAndPushFlow(HookTestCase):
             with self.subTest():
                 self._review_done()
                 results = run_hooks_parallel(
-                    GATE_CHECK, [bash_call('git commit -m x')] * PARALLEL_PROCESSES, self.data_dir,
+                    GATE_CHECK, [bash_call('git commit -m x') for _ in range(PARALLEL_PROCESSES)],
+                    self.data_dir,
                 )
                 allowed = [r for r in results if not r.denied]
                 self.assertEqual(len(allowed), 1, results)
@@ -166,11 +167,13 @@ class TestParallelGateAck(HookTestCase):
                 self.state.record_deny(SESSION, 'git_commit_gate')
                 self.state.record_deny(SESSION, 'git_push_gate')
                 ack = 'gate-ack commit_ready --reason xxxxxxxxxxxxxxxxxxxxxxxx'
-                run_hooks_parallel(GATE_CHECK, [bash_call(ack)] * PARALLEL_PROCESSES, self.data_dir)
                 push_ack = (
                     f'gate-ack user_authorized_push --prompt-id {pid} --reason xxxxxxxxxxxxxxxxxxxxxxxx'
                 )
-                run_hooks_parallel(GATE_CHECK, [bash_call(push_ack)] * PARALLEL_PROCESSES, self.data_dir)
+                for command in (ack, push_ack):
+                    calls = [bash_call(command) for _ in range(PARALLEL_PROCESSES)]
+                    run_hooks_parallel(GATE_CHECK, calls, self.data_dir)
+                    run_hooks_parallel(CONFIRM_RUN, [post_call(c) for c in calls], self.data_dir)
                 self.assertEqual(self.unconsumed('commit_ready'), 1)
                 self.assertEqual(self.unconsumed('user_authorized_push'), 1)
                 self.state.consume_acks(SESSION, ['commit_ready', 'user_authorized_push'])

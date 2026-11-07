@@ -1,5 +1,6 @@
 """Shared helpers: run the real hook scripts against a temporary data directory."""
 import copy
+import itertools
 import json
 import os
 import subprocess
@@ -16,6 +17,7 @@ from state import State, _RETENTION_DAYS
 
 SCRIPTS_DIR = os.path.join(PLUGIN_DIR, 'scripts')
 GATE_CHECK = os.path.join(SCRIPTS_DIR, 'gate_check.py')
+CONFIRM_RUN = os.path.join(SCRIPTS_DIR, 'confirm_run.py')
 PROMPT_STORE = os.path.join(SCRIPTS_DIR, 'prompt_store.py')
 SESSION_INIT = os.path.join(SCRIPTS_DIR, 'session_init.py')
 VALIDATE_POLICY = os.path.join(SCRIPTS_DIR, 'validate_policy.py')
@@ -96,8 +98,20 @@ def run_hooks_parallel(script: str, hook_inputs: list, data_dir: str) -> List[Ho
     return results
 
 
+_tool_use_ids = itertools.count(1)
+
+
 def tool_call(tool_name: str, tool_input: dict, session_id: str = SESSION) -> dict:
-    return {'session_id': session_id, 'tool_name': tool_name, 'tool_input': tool_input}
+    """A PreToolUse input with a tool_use_id of its own, as Claude Code sends."""
+    return {
+        'session_id': session_id, 'tool_name': tool_name, 'tool_input': tool_input,
+        'tool_use_id': f'toolu_test_{next(_tool_use_ids)}',
+    }
+
+
+def post_call(call: dict) -> dict:
+    """The PostToolUse input Claude Code sends after the call ran without error."""
+    return {**call, 'hook_event_name': 'PostToolUse', 'tool_response': {}}
 
 
 def bash_call(command: str, session_id: str = SESSION) -> dict:
@@ -171,19 +185,41 @@ class HookTestCase(unittest.TestCase):
     def add_prompt(self, text: str) -> int:
         return self.state.add_user_prompt(SESSION, text)
 
+    def confirm(self, call: dict) -> HookResult:
+        """PostToolUse for a call that ran without error."""
+        return run_hook(CONFIRM_RUN, post_call(call), self.data_dir)
+
+    def run_call(self, command_or_call) -> HookResult:
+        """A call that the hook let through and that then ran: PreToolUse, then PostToolUse."""
+        call = command_or_call if isinstance(command_or_call, dict) else bash_call(command_or_call)
+        result = self.gate(call)
+        if not result.denied:
+            confirmed = self.confirm(call)
+            assert confirmed.returncode == 0 and confirmed.stderr == '', confirmed
+        return result
+
     def shell_command(self, command: str) -> str:
         """The command after the hook rewrote a gate-ack / gate-toggle call."""
         result = self.gate(command)
         assert result.returncode == 0 and result.stderr == '', result
         return result.hook['updatedInput']['command']
 
-    def gate_command(self, command: str) -> str:
-        """Run a gate-ack / gate-toggle command as Claude Code does: hook rewrite, then bash."""
+    def gate_command(self, command: str, confirm: bool = True) -> str:
+        """Run a gate-ack / gate-toggle command as Claude Code does: hook rewrite, bash, then
+        PostToolUse when bash exited 0 (confirm=False: the call was stopped after the hook)."""
+        call = bash_call(command)
+        result = self.gate(call)
+        assert result.returncode == 0 and result.stderr == '', result
         proc = subprocess.run(
-            ['bash', '-c', self.shell_command(command)], capture_output=True, text=True,
-            cwd=self.data_dir, timeout=HOOK_TIMEOUT_SECONDS,
+            ['bash', '-c', result.hook['updatedInput']['command']], capture_output=True,
+            text=True, cwd=self.data_dir, timeout=HOOK_TIMEOUT_SECONDS,
         )
-        return proc.stdout + proc.stderr
+        output = proc.stdout + proc.stderr
+        if confirm and proc.returncode == 0:
+            confirmed = self.confirm(call)
+            assert confirmed.returncode == 0 and confirmed.stderr == '', confirmed
+            output += confirmed.context
+        return output
 
     def deny_then_ack(self, gate_name: str, command: str, item: str, **ack_args) -> str:
         """Provoke a deny (deny-first), then ack the item."""
@@ -223,6 +259,10 @@ def seed_row(state: State, table: str, session_id: str, timestamp: str) -> None:
         'acks': ('(session_id, item, reason, created_at)', (session_id, 'i', 'r', timestamp)),
         'nudge_firings': ('(session_id, nudge_name, prompt_id)', (session_id, 'n', 1)),
         'gate_passes': ('(session_id, gate_name, prompt_id)', (session_id, 'g', 1)),
+        'pending_effects': (
+            '(session_id, tool_use_id, kind, name, payload, created_at)',
+            (session_id, 't', 'k', 'n', '{}', timestamp),
+        ),
     }[table]
     columns, values = sql
     marks = ', '.join('?' for _ in values)

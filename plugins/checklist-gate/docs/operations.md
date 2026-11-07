@@ -53,6 +53,7 @@ OFF は、ユーザーが外すよう頼んだときだけ受け付ける。Clau
 
 - `--prompt-id` で、外すよう頼んだユーザー発話を指定する
 - その発話が直近の数件以内にあり、「off」「オフ」「外して」「無効」などの語と、ゲート名か「ゲート」「gate」という語の両方を含み、否定されていない（「off にしないで」など）ときだけ OFF になる。例: 「git_push_gate を外して」「push のゲートを OFF にして」「gate-off」（skill 名は両方の語として扱う）
+- OFF は、gate-toggle の呼び出しが実行された後に効く。その呼び出しを許可ダイアログで拒否すれば、ゲートは外れない
 - 絶対に止めるゲート（`block: true`）は、ユーザーの指示があっても OFF にできない（拒否される）。止めるのをやめるには policy-source.md を直して apply-config で反映する
 - ON に戻すのに条件はない。ただし policy.json で `enabled: false` のゲートは、トグルでは ON にできない（拒否される）。有効にするには policy-source.md を直して apply-config で反映する
 

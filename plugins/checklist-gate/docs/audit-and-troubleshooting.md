@@ -85,12 +85,23 @@ WHERE session_id = '<セッションID>'
 ORDER BY created_at;
 ```
 
-自動通過の前提ゲートを最後に通過したターンは `gate_passes` に記録される。
+自動通過の前提ゲートを最後に通過したターンは `gate_passes` に記録される。記録されるのは、その呼び出しが止められずにエラーなく終わったとき。
 
 ```sql
 SELECT gate_name, prompt_id
 FROM gate_passes
 WHERE session_id = '<セッションID>';
+```
+
+### 確定を待っている書き込み
+
+ack の記録・gate-toggle off・前提ゲートの通過は、呼び出しが実行されるまで `pending_effects` に保留として残る。止められた呼び出しの保留は確定されず、掃除で消える。
+
+```sql
+SELECT tool_use_id, kind, name, created_at
+FROM pending_effects
+WHERE session_id = '<セッションID>'
+ORDER BY created_at;
 ```
 
 ### deny 記録の確認（deny-first 用）
@@ -121,6 +132,12 @@ WHERE session_id = '<セッションID>';
 1. **deny reason を読む** -- deny メッセージに、どの ack が不足しているか、どう ack すればよいかが記載されている
 2. **`gate-ack --help-gates` を実行する** -- 全ゲートと ack 項目の一覧、各項目の hint が表示される
 3. hint に従って、必要な確認を行い、ack を宣言する
+
+### ack したのに、また止まる
+
+- gate-ack の実行を許可ダイアログで拒否した場合、その ack は効かない（意図した挙動）
+- ack は、gate-ack の呼び出しが実行された後に PostToolUse フックが記録する。プラグインを更新した後に Claude Code を再起動していないと、PostToolUse フックが動かず、ack が記録されない
+- 同じ項目の ack が先に記録されていた場合は、その旨が Claude に通知される。そのまま操作を再試行すればよい
 
 ### DB をリセットしたい
 

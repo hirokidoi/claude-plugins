@@ -1,4 +1,5 @@
 """Unit tests for --affirm logic in gate_check.py _handle_gate_ack."""
+import itertools
 import os
 import shlex
 import tempfile
@@ -6,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.hook_harness import example_policy, write_policy
+from confirm_run import _apply
 from gate_check import _handle_gate_ack
 from state import State
 
@@ -22,6 +24,7 @@ class _AffirmTestBase(unittest.TestCase):
         self.state = State(':memory:')
         self.state.init_schema()
         self.state.touch_session('sess-1', '/tmp')
+        self._ids = itertools.count(1)
 
         # Pre-record a deny so deny-first passes
         self.state.record_deny('sess-1', 'git_push_gate')
@@ -34,9 +37,13 @@ class _AffirmTestBase(unittest.TestCase):
     # -- helpers --
 
     def _call_ack(self, command: str) -> str:
-        """Parse command and call _handle_gate_ack, returning the result string."""
+        """Call _handle_gate_ack, then confirm the held ack as PostToolUse would."""
         tokens = shlex.split(command)
-        return _handle_gate_ack(tokens[1:], 'sess-1', self.state)
+        tool_use_id = f'toolu_affirm_{next(self._ids)}'
+        result = _handle_gate_ack(tokens[1:], 'sess-1', self.state, tool_use_id)
+        for effect in self.state.take_pending('sess-1', tool_use_id):
+            _apply(self.state, 'sess-1', effect)
+        return result
 
     def _add_prompt(self, text: str) -> int:
         """Add a user prompt and return its id."""

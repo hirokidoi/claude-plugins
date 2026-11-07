@@ -48,16 +48,26 @@ gate_check.py（判定の順序は「純粋な計算 → DB」）
   |      - 不足した user-prompt-match ack: 自動通過の根拠になる発話を探す
   |      - どれかのゲートが未充足: deny レスポンス（ack を要求するメッセージ）。gate_denies に記録（deny-first 用）。何も消費しない
   |      - 全ゲート充足: 1 つの書き込みロックの中で ack を消費し、自動通過の ack を記録して通過。
-  |        消費できなかった（並列の呼び出しが先に使った）ときは deny。自動通過の前提ゲートなら gate_passes に通過したターンを記録
+  |        消費できなかった（並列の呼び出しが先に使った）ときは deny。自動通過の前提ゲートなら、通過したターンを保留として書く
   +-- 7. 例外: 「止める必要あり」または不明なら deny（内部エラーと再試行の案内）。天の声ゲートだけが当たる場合は通過
   +-- 8. deny の出力自体が失敗したら、stderr に理由を書いて終了コード 2
+  |
+  v
+[別のフック・許可ダイアログ・deny ルールが止めなければ、ツールが実行される]
+  |
+  v
+PostToolUse hook（エラーなく終わった呼び出しだけ）
+  |
+  v
+confirm_run.py  --->  この呼び出し（tool_use_id）の保留を取り出し、本来の書き込みを行う
   |
   v
 [Claude が gate-ack コマンドを Bash で実行しようとする]
   |
   v
 gate_check.py が検出 → deny-first チェック → 未消費の ack が無いかのチェック
-  → (user-prompt-match の場合) 発話検証 → ack を記録 → command を書き換え
+  → (user-prompt-match の場合) 発話検証 → ack を保留として書く → command を書き換え
+  → 書き換えたコマンドが実行されたら、confirm_run.py が ack を記録する
   |
   v
 [再度ツール使用 -> PreToolUse -> gate_check.py -> 今度は通過]
@@ -72,20 +82,22 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 3. **PreToolUse**: ツール使用時に gate_check.py がポリシーに基づいてゲート判定を行う
 4. **deny**: ゲート条件未充足の場合、deny レスポンスを返却し、gate_denies テーブルに deny を記録する
 5. **gate-ack**: ゲートで拒否された場合、ack コマンドで条件を宣言する。deny-first により、deny が記録されていない場合は ack が拒否される
-6. **PreToolUse (再試行)**: 再度ツールを使用すると、ack 済みのため通過する
-7. **nudge gate**: `require: []` かつ `message` を持ち、block でないゲートはそのターン最初の一致時に additionalContext を注入して通過（deny しない）
-8. **block gate**: `block: true` のゲートは一致した時点で deny する。gate-ack もトグルも効かない
+6. **PostToolUse**: 実行された呼び出しについて、confirm_run.py が保留を確定する（ack の記録・gate-toggle off・前提ゲートの通過）
+7. **PreToolUse (再試行)**: 再度ツールを使用すると、ack 済みのため通過する
+8. **nudge gate**: `require: []` かつ `message` を持ち、block でないゲートはそのターン最初の一致時に additionalContext を注入して通過（deny しない）
+9. **block gate**: `block: true` のゲートは一致した時点で deny する。gate-ack もトグルも効かない
 
 ### 責務分担
 
 - **hooks (hooks.json)**: どのフックイベントでどのスクリプトを実行するかの宣言
 - **scripts/prompt_store.py**: UserPromptSubmit hook スクリプト。ユーザーの発話を DB に記録し、additionalContext で prompt_id をエージェントに通知する。システムの通知だけの発話は記録しない
-- **scripts/gate_check.py**: PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証・キーワードチェック・自動通過、gate-ack / gate-toggle コマンドの内部処理、天の声ゲート（nudge gate）の per-turn additionalContext 注入、絶対に止めるゲート（block gate）の deny
+- **scripts/gate_check.py**: PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証・キーワードチェック・自動通過、gate-ack / gate-toggle コマンドの内部処理、天の声ゲート（nudge gate）の per-turn additionalContext 注入、絶対に止めるゲート（block gate）の deny。ゲートを緩める書き込みは保留として書く
+- **scripts/confirm_run.py**: PostToolUse hook スクリプト。実行された呼び出しの保留を確定する
 - **scripts/validate_policy.py**: policy.json の検証 CLI。apply-config が書き込む前に使う
 - **lib/policy.py**: policy.json の読み込み・検証・既定値の補完。検証規則の正。gate_check.py・session_init.py・validate_policy.py が使う
 - **lib/shell_parse.py**: Bash コマンド行を単純コマンドに分ける字句解析器（引用符・置換・ヒアドキュメント・包みの解釈）
 - **lib/prompt_text.py**: 記録された発話から、IDE・貼り付け・システムの通知のブロックを取り除き、ユーザーが書いた部分を取り出す
-- **gate-ack / gate-toggle コマンド**: Claude が Bash で実行するコマンド。gate_check.py が PreToolUse フックで検出し、内部で処理する（外部バイナリは実行されない）
+- **gate-ack / gate-toggle コマンド**: Claude が Bash で実行するコマンド。gate_check.py が PreToolUse フックで検出して内部で処理し、ack の記録と off は confirm_run.py が実行後に確定する（外部バイナリは実行されない）
 - **State (state.py)**: SQLite を用いたデータの永続化（DAO 層）
 - **policy.json**: ゲートルール・ack 項目の宣言的定義。`block: true` ＋ `message` で絶対に止めるゲートを、block でない `require: []` ＋ `message` で天の声ゲートを定義する。書式は `lib/policy.py` が検証する
 
@@ -97,10 +109,11 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 
 | ファイル | 責務 |
 |---|---|
-| hooks/hooks.json | フックイベント（SessionStart / UserPromptSubmit / PreToolUse）と実行するスクリプトの対応定義。`$CLAUDE_PLUGIN_ROOT` 環境変数を使って scripts/ 配下の Python スクリプトを直接呼び出す |
+| hooks/hooks.json | フックイベント（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse）と実行するスクリプトの対応定義。`$CLAUDE_PLUGIN_ROOT` 環境変数を使って scripts/ 配下の Python スクリプトを直接呼び出す |
 | scripts/session_init.py | データディレクトリの用意、セッションの最終使用時刻の更新、スキーマ初期化、古いデータの掃除、policy.json の状態の知らせ、セッションコンテキストの出力。DB の各段は個別に失敗を受け止め、出力までは必ず進む |
 | scripts/prompt_store.py | UserPromptSubmit hook スクリプト。ユーザー発話を DB に記録し、additionalContext で prompt_id をエージェントに通知 |
-| scripts/gate_check.py | PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証、gate-ack / gate-toggle コマンドの内部処理（ack 記録・トグル操作）、天の声ゲートの per-turn additionalContext 注入、絶対に止めるゲートの deny |
+| scripts/gate_check.py | PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証、gate-ack / gate-toggle コマンドの内部処理（検証、ack と off の保留、on のトグル操作）、天の声ゲートの per-turn additionalContext 注入、絶対に止めるゲートの deny |
+| scripts/confirm_run.py | PostToolUse hook スクリプト。呼び出しの保留を取り出して確定する。記録できなかった ack は additionalContext で知らせる。失敗しても出力せず終了コード 0 |
 | scripts/validate_policy.py | policy.json の検証 CLI（`<path>` または `-` で stdin。終了コードで結果を返す） |
 | lib/policy.py | policy.json の読み込み・検証・既定値の補完、trigger のパターン構文の解析、ack 項目を要求するゲートの引き当て |
 | lib/shell_parse.py | `command_forms`: コマンド行に含まれるすべての単純コマンドを、原文と正規化した形の組で返す。読めない入力は `OPAQUE` の 1 組にする |
@@ -132,7 +145,7 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 
 #### gate-ack / gate-toggle を hook 内部で処理する理由
 
-gate-ack / gate-toggle コマンドは gate_check.py が PreToolUse フックで検出し、内部で ack 記録 + command をメッセージを表示するだけのコマンドに書き換えて処理する。外部バイナリとして実行しない理由は以下の通り。
+gate-ack / gate-toggle コマンドは gate_check.py が PreToolUse フックで検出し、内部で検証して command をメッセージを表示するだけのコマンドに書き換える。ack の記録と off は保留として書き、書き換えたコマンドが実行された後に confirm_run.py が確定する（「保留と確定」を参照）。外部バイナリとして実行しない理由は以下の通り。
 
 - **permissions 問題**: Claude Code は Bash コマンドの実行前にユーザー許可を求める。gate-ack は `--reason` 引数の内容が毎回変わるため Always allow が効かず、ack のたびにユーザーに許可ダイアログが表示される
 
@@ -143,6 +156,17 @@ gate-ack / gate-toggle コマンドは gate_check.py が PreToolUse フックで
 gate-toggle off は、`--prompt-id` で示したユーザー発話が直近の数件（`_INSTRUCTION_PROMPT_DISTANCE`）以内にあり、外す指示の語（off・オフ・外して・無効など）を否定なしで含み、かつゲート名か「ゲート」「gate」という語を含むときだけ受け付ける（`_verify_toggle_off`）。skill 名の「gate-off」は両方の語として扱う。エージェントが自分の判断でゲートを外せないようにするため。on には条件を付けない。トグルは session_id ごとに DB の gate_toggles に残るため、同じセッションの再開では持ち越され、`/clear` や新しいセッションでは持ち越されない。
 
 絶対に止めるゲート（block）は、発話の条件にかかわらず off を拒否する。判定は DB を開く前に行うので、トグルの記録（block にする前に off にした記録を含む）は見ない。
+
+#### 保留と確定
+
+PreToolUse フックが通した呼び出しでも、その後に別のフック・許可ダイアログ（ユーザーの拒否）・deny ルールが止めることがある。PreToolUse の中で書いた状態はそのとき取り消されないので、ゲートを緩める書き込みはその場では行わず、保留にする。
+
+- 保留にするのは、止められた呼び出しで残るとゲートが緩む 3 つ: gate-ack の記録、gate-toggle off、自動通過の前提ゲートの通過の記録。消費・deny の消去・失効は、残っても止める側にずれるだけなので PreToolUse で行う
+- 保留は `pending_effects` に `session_id` と `tool_use_id` をキーにして書く。同じ呼び出しで PreToolUse がもう一度走っても上書きになる
+- PostToolUse はエラーなく終わった呼び出しでだけ呼ばれ、止められた呼び出しと失敗した呼び出しでは呼ばれない。confirm_run.py は、保留があるときだけ 1 つの書き込みロックの中で保留を取り出して消し（`State.take_pending`。同じ保留を確定できるのは 1 回だけ）、そのあと既存の書き込みのメソッドで書く
+- ack の確定は `add_ack_if_allowed` を通るので、積み増しと 1 発話 1 回の規則は書き込みロックの中で確かめ直される。保留の間に同じ項目の ack が先に確定していたら記録せず、理由を additionalContext で知らせる
+- `tool_use_id` の無い入力では、gate-ack と off はエラーにし、通過の記録は書かない
+- 確定されなかった保留は効かず、掃除で消える
 
 #### hooks.json のパス解決
 
@@ -160,7 +184,7 @@ policy.json の不正・DB のロック・フックの内部エラーで黙っ�
 - policy.json が不正なときは、どのゲートが何に掛かるか分からないため、止める範囲を広く取る。読み取り専用のツール（`_READ_ONLY_TOOLS`）は止めず、復旧の経路（policy-source.md を読む）を残す。許可済みの policy.json の書き込みも通す
 - policy.json が無いときは止めない（導入直後の状態）
 - 天の声ゲートだけが関わる呼び出しは、異常が起きても通す
-- PreToolUse のフック宣言には、起動の失敗・時間切れ・想定外の終了を止める側に倒す設定（`onFailure`）を付けて二重化する。タイムアウトは DB の待ち時間（`BUSY_TIMEOUT_SECONDS`）より十分長くする。SessionStart と UserPromptSubmit には付けない（失敗で発話やセッションの開始を止めないため）
+- PreToolUse のフック宣言には、起動の失敗・時間切れ・想定外の終了を止める側に倒す設定（`onFailure`）を付けて二重化する。タイムアウトは DB の待ち時間（`BUSY_TIMEOUT_SECONDS`）より十分長くする。SessionStart と UserPromptSubmit には付けない（失敗で発話やセッションの開始を止めないため）。PostToolUse にも付けない（ツールは実行済みで、確定に失敗しても保留が効かないだけ = 止める側）
 
 #### policy.json の保護
 
@@ -333,7 +357,7 @@ policy.json のトップレベルに定義する、肯定応答判定用のキ�
 2. その発話が `_authorizes` を通らない（except・否定）、その発話を根拠にした ack がすでにある、または前提ゲートの最後の通過がその発話のターンより前なら、自動通過しない。前提ゲートを同じ呼び出しの中で通過する場合は、今のターンで通過したものとして扱う
 3. 見つかった発話は、全ゲートが充足した後、消費と同じ書き込みロックの中で「消費済みの ack」として記録する（`State.consume_acks`）。そこで同じ発話の ack がすでにあれば（並列の呼び出しが先に使った場合）、何も変えずに deny する。通過したときは additionalContext でエージェントに通知する
 
-前提ゲートの通過は gate_passes テーブルに、通過した時点の最新の prompt_id として記録する。記録するのは、いずれかの項目の `auto_authorize_after_gate` に名前があるゲートだけ。dry-run のように実際には commit しないコマンドは、前提ゲートの except_patterns に入れておく（同梱の例は `Bash(git commit --dry-run *)` を除外している）。except に当たったコマンドではゲートが評価されないので、通過も記録されない。
+前提ゲートの通過は gate_passes テーブルに、通過した時点の最新の prompt_id として記録する。PreToolUse では保留として書き、その呼び出しが止められずにエラーなく終わったときに PostToolUse で記録する（「保留と確定」）。記録するのは、いずれかの項目の `auto_authorize_after_gate` に名前があるゲートだけ。dry-run のように実際には commit しないコマンドは、前提ゲートの except_patterns に入れておく（同梱の例は `Bash(git commit --dry-run *)` を除外している）。except に当たったコマンドではゲートが評価されないので、通過も記録されない。
 
 ### 消費の原子性
 
@@ -391,6 +415,7 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
 | test_gate_check_affirm.py | `--affirm` のロジックと、キーワードの照合（単語・正規化・IDE や貼り付けのブロックの除外） |
 | test_auto_authorize.py | 自動通過の各条件（否定を含む）と、フックを通した自動通過 |
 | test_block_gate.py | 絶対に止めるゲートが、ack・トグル・DB の異常にかかわらず止めること、引用符の中や別のコマンドには反応しないこと、gate-toggle の off の拒否と list の表示 |
+| test_confirm_run.py | 緩める書き込み（ack・off・前提ゲートの通過）が PostToolUse の後にだけ効くこと、別の呼び出し・別のセッションの PostToolUse では確定しないこと、二重に確定しないこと、確定の時点で記録できなかった ack の知らせ、`tool_use_id` の無い入力、DB の異常 |
 | test_hook_safety.py | 書き換え後のコマンドが入力や policy の文字列を展開しないこと（実際に bash で実行して確かめる）、gate-toggle off の制限、ack の積み増しと失効、連結したコマンドの消費、並列の呼び出しで 1 つの ack が 1 回しか使えないこと、deny された呼び出しで天の声が発火済みにならないこと |
 | test_prompt_text.py | 発話からのブロックの除去と、システムの通知だけの発話の判定 |
 
@@ -407,6 +432,7 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
   - 「commit → push して」の後、commit を通過した push が gate-ack なしで通ること
   - gate-toggle でゲートの有効/無効が切り替わること
   - 絶対に止めるゲートに当たるコマンドが、実行される前に止まること
+  - gate-ack の実行を許可ダイアログで拒否したとき、その ack が効かないこと
 
 ---
 
@@ -428,3 +454,5 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
 - **onFailure**: フック宣言の `onFailure` は対応した版の Claude Code でだけ効く。古い版では無視されて通る。スクリプト内で異常を deny にする本体の対策は版によらず効く
 - **SessionStart の systemMessage**: 利用者向けの表示が出るかは実行環境に依る。表示されなくても、同じ知らせが additionalContext でエージェントに届く
 - **自動通過・発話の判定**: push という語を含まない取り消し（「やっぱりやめて」など）は読み取れない。照合は語の一致で、意図を理解するものではない
+- **確定の前提**: ack の記録・off・前提ゲートの通過は、PostToolUse フックが動かない環境（hooks.json の変更を読み込む前など）では確定されず、効かない
+- **通過の記録が見るのは呼び出しの終わり方**: 前提ゲートに当たったコマンドそのものの成否は見ない。`git commit …; echo done` や `git commit … || true` は、commit が失敗しても呼び出しはエラーなく終わるので通過として記録される。バックグラウンドで実行される Bash で PostToolUse がいつ呼ばれるかは確かめていない

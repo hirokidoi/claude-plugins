@@ -190,9 +190,15 @@ class TestHookDeclaration(unittest.TestCase):
         self.assertGreater(entry['timeout'], BUSY_TIMEOUT_SECONDS)
 
     def test_other_hooks_never_block_on_failure(self):
-        for event in ('SessionStart', 'UserPromptSubmit'):
+        for event in ('SessionStart', 'UserPromptSubmit', 'PostToolUse'):
             with self.subTest(event=event):
                 self.assertNotIn('onFailure', self._entry(event))
+
+    def test_post_tool_use_confirms_every_tool_and_outlasts_the_database_wait(self):
+        self.assertNotIn('matcher', self.hooks['PostToolUse'][0])
+        entry = self._entry('PostToolUse')
+        self.assertIn('scripts/confirm_run.py', entry['command'])
+        self.assertGreater(entry['timeout'], BUSY_TIMEOUT_SECONDS)
 
 
 class TestPython39Syntax(unittest.TestCase):

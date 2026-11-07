@@ -219,18 +219,26 @@ def _first_word(command: str) -> str:
     return os.path.basename(tokens[0]) if tokens else ''
 
 
-def _handle_gate_command(command: str, head: str, session_id: str, state: State) -> str:
+def _handle_gate_command(
+    command: str, head: str, session_id: str, state: State, tool_use_id: Optional[str]
+) -> str:
     """Parse and handle gate-ack / gate-toggle commands internally."""
     try:
         tokens = shlex.split(command)
     except ValueError:
         return _shell_message(f'[{head}] Error: failed to parse command', error=True)
     if head == 'gate-ack':
-        return _handle_gate_ack(tokens[1:], session_id, state)
-    return _handle_gate_toggle(tokens[1:], session_id, state)
+        return _handle_gate_ack(tokens[1:], session_id, state, tool_use_id)
+    return _handle_gate_toggle(tokens[1:], session_id, state, tool_use_id)
 
 
-def _handle_gate_ack(args: list, session_id: str, state: State) -> str:
+_NO_TOOL_USE_ID = (
+    'Error: the hook input has no tool_use_id, so this cannot be recorded. '
+    'Tell the user; the Claude Code version may be unsupported.'
+)
+
+
+def _handle_gate_ack(args: list, session_id: str, state: State, tool_use_id: Optional[str]) -> str:
     """Handle gate-ack command internally."""
     try:
         positionals, options = _parse_gate_args(
@@ -301,12 +309,8 @@ def _handle_gate_ack(args: list, session_id: str, state: State) -> str:
     if item_type != 'session' and state.has_unconsumed_ack(session_id, item):
         return stacked_reject
 
-    if item_type == 'session':
-        state.add_session_check(session_id, item, reason)
-    elif item_type == 'consumable':
-        if state.add_ack_if_allowed(session_id, item, reason) != 'added':
-            return stacked_reject
-    else:
+    prompt_id = None
+    if item_type == 'user-prompt-match':
         # --- user-prompt-match validation ---
         if prompt_id_str is None:
             return _shell_message(
@@ -375,11 +379,12 @@ def _handle_gate_ack(args: list, session_id: str, state: State) -> str:
         if not _authorizes(checked_text, cfg):
             return unified_reject
 
-        added = state.add_ack_if_allowed(session_id, item, reason, prompt_id=prompt_id)
-        if added == 'stacked':
-            return stacked_reject
-        if added == 'prompt_used':
-            return used_reject
+    if not tool_use_id:
+        return _shell_message(f'[gate-ack] {_NO_TOOL_USE_ID}', error=True)
+    state.add_pending(
+        session_id, tool_use_id, 'ack', item,
+        {'type': item_type, 'reason': reason, 'prompt_id': prompt_id},
+    )
 
     # NOTE: deny is NOT cleared here. It is cleared when the gate actually
     # passes (all required items satisfied). This allows gates with multiple
@@ -388,7 +393,9 @@ def _handle_gate_ack(args: list, session_id: str, state: State) -> str:
     return _shell_message(f'[gate-ack] {item} acknowledged (type: {item_type})')
 
 
-def _handle_gate_toggle(args: list, session_id: str, state: State) -> str:
+def _handle_gate_toggle(
+    args: list, session_id: str, state: State, tool_use_id: Optional[str]
+) -> str:
     """Handle gate-toggle command internally."""
     try:
         remaining, options = _parse_gate_args(args, ('--prompt-id',), ())
@@ -436,11 +443,15 @@ def _handle_gate_toggle(args: list, session_id: str, state: State) -> str:
                 f'turned on for a session. Enable it in policy-source.md and run apply-config.',
                 error=True,
             )
-        if not enabled:
+        if enabled:
+            state.set_gate_toggle(session_id, gate_name, enabled=True)
+        else:
             rejection = _verify_toggle_off(state, session_id, gate_name, prompt_id_str)
             if rejection:
                 return _shell_message(rejection, error=True)
-        state.set_gate_toggle(session_id, gate_name, enabled=enabled)
+            if not tool_use_id:
+                return _shell_message(f'[gate-toggle] {_NO_TOOL_USE_ID}', error=True)
+            state.add_pending(session_id, tool_use_id, 'toggle_off', gate_name, {})
         action = 'enabled' if enabled else 'disabled'
         return _shell_message(f'[gate-toggle] {gate_name} {action} for this session')
 
@@ -746,7 +757,7 @@ def _find_auto_authorization(
 
 
 def _evaluate_gates(
-    policy: dict, applicable: list, session_id: str, tool_name: str, tool_input: dict
+    policy: dict, applicable: list, session_id: str, tool_use_id: Optional[str]
 ) -> Optional[dict]:
     """Evaluate the gates that apply against the DB; returns the hook response or None."""
     ack_items_cfg = policy['ack_items']
@@ -850,8 +861,10 @@ def _evaluate_gates(
 
         for gate_name, _, _ in passing_gates:
             state.clear_deny(session_id, gate_name)
-            if gate_name in pass_tracked_gates and latest_prompt_id is not None:
-                state.record_gate_pass(session_id, gate_name, latest_prompt_id)
+            if gate_name in pass_tracked_gates and latest_prompt_id is not None and tool_use_id:
+                state.add_pending(
+                    session_id, tool_use_id, 'gate_pass', gate_name, {'prompt_id': latest_prompt_id}
+                )
         for gate_name in nudge_firings:
             state.record_nudge_firing(session_id, gate_name, latest_prompt_id)
 
@@ -862,13 +875,15 @@ def _evaluate_gates(
         state.close()
 
 
-def _handle_gate_command_call(tool_input: dict, head: str, session_id: str) -> dict:
+def _handle_gate_command_call(
+    tool_input: dict, head: str, session_id: str, tool_use_id: Optional[str]
+) -> dict:
     """Run gate-ack / gate-toggle; any failure becomes an error message for the agent."""
     state = None
     try:
         state = State()
         state.init_schema()
-        result = _handle_gate_command(tool_input['command'], head, session_id, state)
+        result = _handle_gate_command(tool_input['command'], head, session_id, state, tool_use_id)
     except Exception as e:
         result = _shell_message(
             f'[checklist-gate] Error: {type(e).__name__}: {e}. Retry the command.', error=True
@@ -889,12 +904,15 @@ def _decide(ctx: dict) -> Optional[dict]:
     tool_input = hook_input.get('tool_input', {})
     if not isinstance(tool_input, dict):
         raise ValueError('tool_input is not a JSON object')
+    tool_use_id = hook_input.get('tool_use_id')
+    if not isinstance(tool_use_id, str):
+        tool_use_id = None
 
     # --- 1. gate-ack / gate-toggle command interception (handled internally) ---
     if tool_name == 'Bash' and isinstance(tool_input.get('command'), str):
         head = _first_word(tool_input['command'])
         if head in ('gate-ack', 'gate-toggle'):
-            return _handle_gate_command_call(tool_input, head, session_id)
+            return _handle_gate_command_call(tool_input, head, session_id, tool_use_id)
 
     # --- 2. policy.json protection ---
     data_dir = _data_dir()
@@ -939,7 +957,7 @@ def _decide(ctx: dict) -> Optional[dict]:
     ctx['must_block'] = any(gate['require'] for gate in applicable)
 
     # --- 5. Evaluate against the DB ---
-    return _evaluate_gates(policy, applicable, session_id, tool_name, tool_input)
+    return _evaluate_gates(policy, applicable, session_id, tool_use_id)
 
 
 def main() -> None:

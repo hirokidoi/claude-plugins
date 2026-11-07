@@ -4,6 +4,7 @@ Provides the State class that encapsulates all database operations.
 DB location: $CLAUDE_PLUGIN_DATA/checklist-gate.sqlite (WAL mode)
 """
 import datetime
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -19,6 +20,7 @@ _RETENTION_DAYS = {
     'gate_denies': 7,
     'nudge_firings': 7,
     'gate_passes': 7,
+    'pending_effects': 7,
     'session_checks': 30,
     'acks': 30,
 }
@@ -29,6 +31,7 @@ _ORPHAN_TIME_COLUMN = {
     'gate_denies': 'created_at',
     'session_checks': 'checked_at',
     'acks': 'created_at',
+    'pending_effects': 'created_at',
 }
 _MIGRATIONS = (
     ('acks', 'prompt_id', 'INTEGER'),
@@ -53,6 +56,13 @@ class GateToggle:
     gate_name: str
     enabled: bool
     updated_at: str
+
+
+@dataclass
+class PendingEffect:
+    kind: str
+    name: str
+    payload: dict
 
 
 # --- Schema DDL ---
@@ -123,6 +133,16 @@ CREATE TABLE IF NOT EXISTS gate_passes (
     gate_name  TEXT    NOT NULL,
     prompt_id  INTEGER NOT NULL,
     PRIMARY KEY (session_id, gate_name)
+);
+
+CREATE TABLE IF NOT EXISTS pending_effects (
+    session_id  TEXT NOT NULL,
+    tool_use_id TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (session_id, tool_use_id, kind, name)
 );
 
 """
@@ -543,6 +563,42 @@ class State:
             (session_id, gate_name),
         ).fetchone()
         return row['prompt_id'] if row else None
+
+    # --- PendingEffect operations ---
+
+    def add_pending(
+        self, session_id: str, tool_use_id: str, kind: str, name: str, payload: dict
+    ) -> None:
+        """Hold a write until PostToolUse confirms that the tool call ran."""
+        conn = self._get_conn()
+        conn.execute(
+            'INSERT OR REPLACE INTO pending_effects'
+            ' (session_id, tool_use_id, kind, name, payload, created_at)'
+            ' VALUES (?, ?, ?, ?, ?, ?)',
+            (session_id, tool_use_id, kind, name, json.dumps(payload), self._now()),
+        )
+        conn.commit()
+
+    def has_pending(self, session_id: str, tool_use_id: str) -> bool:
+        row = self._get_conn().execute(
+            'SELECT 1 FROM pending_effects WHERE session_id = ? AND tool_use_id = ?',
+            (session_id, tool_use_id),
+        ).fetchone()
+        return row is not None
+
+    def take_pending(self, session_id: str, tool_use_id: str) -> List[PendingEffect]:
+        """Remove and return the call's held writes; a second call gets none."""
+        with self.transaction() as conn:
+            rows = conn.execute(
+                'SELECT kind, name, payload FROM pending_effects'
+                ' WHERE session_id = ? AND tool_use_id = ? ORDER BY created_at, kind, name',
+                (session_id, tool_use_id),
+            ).fetchall()
+            conn.execute(
+                'DELETE FROM pending_effects WHERE session_id = ? AND tool_use_id = ?',
+                (session_id, tool_use_id),
+            )
+        return [PendingEffect(r['kind'], r['name'], json.loads(r['payload'])) for r in rows]
 
     # --- Housekeeping ---
 

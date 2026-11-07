@@ -137,7 +137,7 @@ class TestHookFlow(HookTestCase):
     def test_commit_then_push_without_ack(self):
         pid = self.add_prompt('commit -> push して')
         self._review_done()
-        assert_passed_silently(self.gate('git commit -m x'))
+        assert_passed_silently(self.run_call('git commit -m x'))
         result = self.gate('git push origin master')
         assert_context(result, f'prompt_id={pid}')
         assert_context(result, 'auto-authorized')
