@@ -17,7 +17,8 @@
       "hint": "直近のユーザー発話に明示的な push 指示があった？「pushして」のような直接の依頼が無ければユーザーに確認して。",
       "match_keywords": ["push", "プッシュ"],
       "except_keywords": ["dry-run", "ドライラン", "pushはまだ", "pushはしないで"],
-      "max_prompt_distance": 3
+      "max_prompt_distance": 3,
+      "auto_authorize_after_gate": "git_commit_gate"
     }
   },
   "gates": [
@@ -25,8 +26,14 @@
       "name": "task_start",
       "description": "ファイル編集前に docs_checked を要求",
       "trigger": {
-        "patterns": ["Edit(*)", "Write(*)", "Read(*)", "Glob(*)", "Grep(*)"],
-        "except_patterns": ["Read(*README*)", "Read(*DEVELOPMENT*)", "Glob(*README*)", "Glob(*DEVELOPMENT*)"]
+        "patterns": [
+          "Edit(*)", "Write(*)", "Read(*)", "Glob(*)", "Grep(*)",
+          "Bash(grep *)", "Bash(rg *)", "Bash(sed *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(less *)"
+        ],
+        "except_patterns": [
+          "Read(*README*)", "Read(*DEVELOPMENT*)", "Glob(*README*)", "Glob(*DEVELOPMENT*)",
+          "Bash(*README*)", "Bash(*DEVELOPMENT*)"
+        ]
       },
       "require": ["docs_checked"],
       "enabled": true
@@ -36,7 +43,7 @@
       "description": "git commit 前に commit_ready を要求",
       "trigger": {
         "patterns": ["Bash(git commit *)"],
-        "except_patterns": []
+        "except_patterns": ["Bash(git commit --dry-run *)"]
       },
       "require": ["commit_ready"],
       "enabled": true

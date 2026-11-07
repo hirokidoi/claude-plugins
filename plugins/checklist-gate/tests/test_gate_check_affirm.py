@@ -173,6 +173,36 @@ class TestNormalFlowKeywordReject(_AffirmTestBase):
         )
         self.assertIn('Rejected', result)
 
+    def test_normal_flow_identifier_containing_push(self) -> None:
+        """'web_push.md を直して' does not mention push as a word → reject."""
+        pid = self._add_prompt('web_push.md を直して')
+        result = self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {pid} '
+            f'--reason "ユーザー発話『web_push.md を直して』を受信（prompt_id={pid}）"'
+        )
+        self.assertIn('Rejected', result)
+
+    def test_normal_flow_push_only_in_ide_tag_or_paste(self) -> None:
+        """push appears only in IDE / pasted blocks → reject."""
+        pid = self._add_prompt(
+            '<ide_opened_file>The user opened the file /app/docs/push.md in the IDE.'
+            '</ide_opened_file>\n<pasted_content id="1">git push</pasted_content id="1">\ncommit して'
+        )
+        result = self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {pid} '
+            f'--reason "ユーザー発話『commit して』を受信（prompt_id={pid}）"'
+        )
+        self.assertIn('Rejected', result)
+
+    def test_normal_flow_success_without_space(self) -> None:
+        """'pushして' still mentions push as a word → should pass."""
+        pid = self._add_prompt('commit -> pushして')
+        result = self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {pid} '
+            f'--reason "ユーザー発話『commit -> pushして』を受信（prompt_id={pid}）"'
+        )
+        self.assertIn('acknowledged', result)
+
     def test_normal_flow_success(self) -> None:
         """User says 'push して' → match_keywords hit, no except → should pass."""
         pid = self._add_prompt('push して')
@@ -198,15 +228,55 @@ class TestAffirmEdgeCases(_AffirmTestBase):
         )
         self.assertIn('acknowledged', result)
 
-    def test_affirm_whitespace_normalization(self) -> None:
-        """Whitespace in user prompt should be stripped before comparison."""
-        pid = self._add_prompt(' O K ')
+    def test_affirm_keyword_matches_as_word(self) -> None:
+        """'look' contains 'ok' but is not an affirmative response → reject."""
+        pid = self._add_prompt('look at the log please')
+        result = self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {pid} '
+            f'--affirm "push しますか？" '
+            f'--reason "AIの質問「push しますか？」に対しユーザーが回答したことを確認"'
+        )
+        self.assertIn('Rejected', result)
+
+    def test_affirm_with_surrounding_spaces(self) -> None:
+        pid = self._add_prompt('  OK  ')
         result = self._call_ack(
             f'gate-ack user_authorized_push --prompt-id {pid} '
             f'--affirm "push しますか？" '
             f'--reason "AIの質問「push しますか？」に対しユーザーが空白付きOKで回答したことを確認"'
         )
         self.assertIn('acknowledged', result)
+
+    def test_normal_flow_negated_push(self) -> None:
+        """'commit して、push しないで' mentions push but negates it → reject."""
+        pid = self._add_prompt('commit して、push しないで')
+        result = self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {pid} '
+            f'--reason "ユーザー発話『commit して、push しないで』を受信（prompt_id={pid}）"'
+        )
+        self.assertIn('Rejected', result)
+
+    def test_same_prompt_cannot_authorize_twice(self) -> None:
+        pid = self._add_prompt('push して')
+        command = (
+            f'gate-ack user_authorized_push --prompt-id {pid} '
+            f'--reason "ユーザー発話『push して』を受信（prompt_id={pid}）"'
+        )
+        self.assertIn('acknowledged', self._call_ack(command))
+        self.state.consume_acks('sess-1', ['user_authorized_push'])
+        self.assertIn('already been used', self._call_ack(command))
+
+    def test_cannot_stack_unconsumed_acks(self) -> None:
+        first = self._add_prompt('push して')
+        second = self._add_prompt('もう一回 push して')
+        self.assertIn('acknowledged', self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {first} '
+            f'--reason "ユーザー発話『push して』を受信（prompt_id={first}）"'
+        ))
+        self.assertIn('already acknowledged', self._call_ack(
+            f'gate-ack user_authorized_push --prompt-id {second} '
+            f'--reason "ユーザー発話『もう一回 push して』を受信（prompt_id={second}）"'
+        ))
 
 
 if __name__ == '__main__':

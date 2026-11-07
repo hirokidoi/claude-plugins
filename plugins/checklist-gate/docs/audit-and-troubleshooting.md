@@ -62,13 +62,33 @@ ORDER BY updated_at;
 
 ### ユーザー発話の記録（user-prompt-match 用）
 
-user-prompt-match ack で使用されるユーザー発話記録。UserPromptSubmit hook により自動記録される。
+user-prompt-match ack で使用されるユーザー発話記録。UserPromptSubmit hook により自動記録される。システムの通知だけの発話は記録されない。IDE の情報や貼り付けたテキストは原文のまま残る（照合のときに除かれる）。
 
 ```sql
 SELECT id AS prompt_id, prompt, created_at
 FROM user_prompts
 WHERE session_id = '<セッションID>'
 ORDER BY created_at;
+```
+
+### 自動通過の記録
+
+自動通過で記録された ack は、reason が `auto-authorized:` で始まる。
+
+```sql
+SELECT item, prompt_id, reason, created_at, consumed_at
+FROM acks
+WHERE session_id = '<セッションID>'
+  AND reason LIKE 'auto-authorized:%'
+ORDER BY created_at;
+```
+
+自動通過の前提ゲートを最後に通過したターンは `gate_passes` に記録される。
+
+```sql
+SELECT gate_name, prompt_id
+FROM gate_passes
+WHERE session_id = '<セッションID>';
 ```
 
 ### deny 記録の確認（deny-first 用）
@@ -87,10 +107,10 @@ WHERE session_id = '<セッションID>';
 
 ### ゲートを一時的に無効にしたい
 
-`checklist-gate:gate-off` skill を使う（または `gate-toggle off <ゲート名>`）。
+`checklist-gate:gate-off` skill を使う（または `gate-toggle off <ゲート名> --prompt-id <id>`）。Claude に「<ゲート名> を外して」「push のゲートを OFF にして」のように頼むと、その発話を根拠に無効化される。
 
 - セッション単位の一時的な無効化であり、`policy.json` は変更されない
-- セッション終了時に自動的にデフォルト状態に戻る
+- 新しいセッションでは policy.json の状態から始まる
 - 詳細は [運用ガイド](operations.md) を参照
 
 ### deny が出たが理由が不明
@@ -124,4 +144,4 @@ rm $CLAUDE_PLUGIN_DATA/checklist-gate.sqlite*
 - **session 型の ack**（例: `docs_checked`） -- セッション中は維持される。新しいセッションでは再度 ack が必要
 - **consumable 型の ack**（例: `commit_ready`） -- 使用（消費）済みの ack は再利用できない。同じ操作を再度行う場合は、新たに ack を宣言する必要がある
 - **user-prompt-match 型の ack**（例: `user_authorized_push`） -- consumable と同様に消費型。加えて、ユーザー発話の prompt_id によるキーワード検証が毎回行われる
-- **ランタイムトグル** -- セッション終了時に消失する。新しいセッションでは policy.json のデフォルト状態から開始される
+- **ランタイムトグル** -- 新しいセッションでは policy.json のデフォルト状態から開始される

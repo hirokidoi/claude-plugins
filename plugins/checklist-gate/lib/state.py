@@ -126,6 +126,13 @@ CREATE TABLE IF NOT EXISTS nudge_firings (
     PRIMARY KEY (session_id, nudge_name)
 );
 
+CREATE TABLE IF NOT EXISTS gate_passes (
+    session_id TEXT    NOT NULL,
+    gate_name  TEXT    NOT NULL,
+    prompt_id  INTEGER NOT NULL,
+    PRIMARY KEY (session_id, gate_name)
+);
+
 """
 
 
@@ -245,6 +252,39 @@ class State:
         )
         conn.commit()
 
+    def add_ack_if_allowed(
+        self, session_id: str, item: str, reason: str,
+        prompt_id: Optional[int] = None,
+    ) -> str:
+        """Add an ack in one write lock unless the item has an unconsumed ack or prompt_id is used.
+
+        Returns 'added', 'stacked' or 'prompt_used'."""
+        conn = self._get_conn()
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            if conn.execute(
+                'SELECT 1 FROM acks WHERE session_id = ? AND item = ? AND consumed_at IS NULL',
+                (session_id, item),
+            ).fetchone():
+                conn.rollback()
+                return 'stacked'
+            if prompt_id is not None and conn.execute(
+                'SELECT 1 FROM acks WHERE session_id = ? AND item = ? AND prompt_id = ?',
+                (session_id, item, prompt_id),
+            ).fetchone():
+                conn.rollback()
+                return 'prompt_used'
+            conn.execute(
+                'INSERT INTO acks (session_id, item, reason, created_at, prompt_id)'
+                ' VALUES (?, ?, ?, ?, ?)',
+                (session_id, item, reason, self._now(), prompt_id),
+            )
+            conn.commit()
+            return 'added'
+        except Exception:
+            conn.rollback()
+            raise
+
     def has_unconsumed_ack(self, session_id: str, item: str) -> bool:
         """Return True if at least one unconsumed ack exists for the item."""
         conn = self._get_conn()
@@ -311,6 +351,51 @@ class State:
                 prompt_id=row['prompt_id'],
             )
 
+    def consume_acks(
+        self, session_id: str, items: List[str],
+        grants: Optional[List[tuple]] = None,
+    ) -> bool:
+        """Atomically consume one ack per item and record (item, prompt_id, reason) grants as used.
+
+        Returns False and changes nothing if an item lacks an ack or a grant's prompt is used."""
+        conn = self._get_conn()
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            for item, prompt_id, _ in grants or []:
+                used = conn.execute(
+                    'SELECT 1 FROM acks WHERE session_id = ? AND item = ? AND prompt_id = ?',
+                    (session_id, item, prompt_id),
+                ).fetchone()
+                if used:
+                    conn.rollback()
+                    return False
+            chosen: List[int] = []
+            for item in items:
+                rows = conn.execute(
+                    'SELECT id FROM acks WHERE session_id = ? AND item = ? AND consumed_at IS NULL '
+                    'ORDER BY created_at ASC, id ASC',
+                    (session_id, item),
+                ).fetchall()
+                ack_id = next((r['id'] for r in rows if r['id'] not in chosen), None)
+                if ack_id is None:
+                    conn.rollback()
+                    return False
+                chosen.append(ack_id)
+            now = self._now()
+            conn.executemany(
+                'UPDATE acks SET consumed_at = ? WHERE id = ?', [(now, i) for i in chosen]
+            )
+            conn.executemany(
+                'INSERT INTO acks (session_id, item, reason, created_at, consumed_at, prompt_id)'
+                ' VALUES (?, ?, ?, ?, ?, ?)',
+                [(session_id, item, reason, now, now, pid) for item, pid, reason in grants or []],
+            )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
     # --- UserPrompt operations ---
 
     def add_user_prompt(self, session_id: str, prompt: str) -> int:
@@ -367,6 +452,33 @@ class State:
         if not rows:
             return None
         return min(row['id'] for row in rows)
+
+    def get_recent_prompts(self, session_id: str, limit: int) -> List[UserPrompt]:
+        """Return the last `limit` prompts of the session, newest first."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            'SELECT id, session_id, prompt, created_at FROM user_prompts '
+            'WHERE session_id = ? ORDER BY id DESC LIMIT ?',
+            (session_id, limit),
+        ).fetchall()
+        return [
+            UserPrompt(
+                id=row['id'],
+                session_id=row['session_id'],
+                prompt=row['prompt'],
+                created_at=row['created_at'],
+            )
+            for row in rows
+        ]
+
+    def has_ack_for_prompt(self, session_id: str, item: str, prompt_id: int) -> bool:
+        """Return True if any ack (consumed or not) for the item cites prompt_id."""
+        conn = self._get_conn()
+        row = conn.execute(
+            'SELECT 1 FROM acks WHERE session_id = ? AND item = ? AND prompt_id = ?',
+            (session_id, item, prompt_id),
+        ).fetchone()
+        return row is not None
 
     # --- GateDeny operations ---
 
@@ -617,6 +729,37 @@ class State:
         conn = self._get_conn()
         cursor = conn.execute(
             'DELETE FROM nudge_firings WHERE session_id NOT IN'
+            ' (SELECT session_id FROM sessions)'
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    # --- GatePass operations ---
+
+    def record_gate_pass(self, session_id: str, gate_name: str, prompt_id: int) -> None:
+        """Record the prompt_id of the turn in which the gate last passed."""
+        conn = self._get_conn()
+        conn.execute(
+            'INSERT OR REPLACE INTO gate_passes (session_id, gate_name, prompt_id)'
+            ' VALUES (?, ?, ?)',
+            (session_id, gate_name, prompt_id),
+        )
+        conn.commit()
+
+    def get_gate_pass_prompt_id(self, session_id: str, gate_name: str) -> Optional[int]:
+        """Return the prompt_id of the turn in which the gate last passed, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            'SELECT prompt_id FROM gate_passes WHERE session_id = ? AND gate_name = ?',
+            (session_id, gate_name),
+        ).fetchone()
+        return row['prompt_id'] if row else None
+
+    def cleanup_gate_passes_for_old_sessions(self) -> int:
+        """Delete gate_passes whose session no longer exists. Call after cleanup_old_sessions."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            'DELETE FROM gate_passes WHERE session_id NOT IN'
             ' (SELECT session_id FROM sessions)'
         )
         conn.commit()

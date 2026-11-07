@@ -46,6 +46,7 @@ user-prompt-match タイプの ack 項目には追加の必須フィールドが
 - `match_keywords` が文字列の配列であるか（空配列は不可、最低1つ必要）
 - `except_keywords` が文字列の配列であるか（省略時は空配列 `[]` として出力）
 - `max_prompt_distance` が正の整数であるか（省略時はデフォルト `3` として出力）
+- `auto_authorize_after_gate`（省略可）が `gates[].name` に存在するゲート名か
 
 ### policy-source.md → policy.json の変換ルール（user-prompt-match）
 
@@ -56,6 +57,7 @@ user-prompt-match タイプの ack 項目には追加の必須フィールドが
 | マッチキーワード | match_keywords | バッククォートで囲まれたカンマ区切り → 文字列の配列。例: `` `push`, `プッシュ` `` → `["push", "プッシュ"]` |
 | 除外キーワード | except_keywords | 同上。省略時は `[]` |
 | 有効発話数 | max_prompt_distance | 数値に変換。省略時は `3` |
+| 自動通過の前提ゲート | auto_authorize_after_gate | ゲート名の文字列。省略時はキー自体を出力しない |
 | ヒント | hint | そのまま文字列として出力 |
 
 ### policy-source.md → policy.json の変換ルール（天の声ゲート）

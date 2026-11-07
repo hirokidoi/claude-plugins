@@ -90,9 +90,9 @@ gate-ack --help-gates
 セッション中にゲートを一時的に無効化・有効化するには `gate-toggle` コマンドまたは `checklist-gate:gate-on` / `checklist-gate:gate-off` skill を使います。
 
 ```
-gate-toggle off <ゲート名>    # ゲートを無効化
-gate-toggle on <ゲート名>     # ゲートを有効化
-gate-toggle list             # 全ゲートの現在の状態を表示
+gate-toggle off <ゲート名> --prompt-id <id>   # ゲートを無効化（ユーザーの指示が必要）
+gate-toggle on <ゲート名>                     # ゲートを有効化
+gate-toggle list                             # 全ゲートの現在の状態を表示
 ```
 
-この切替はセッション中のみ有効です。詳細は [運用ガイド](operations.md) を参照してください。
+無効化は、ユーザーがゲートを外すよう頼んだ発話を `--prompt-id` で示したときだけ受け付けます。この切替はセッション中のみ有効です。詳細は [運用ガイド](operations.md) を参照してください。

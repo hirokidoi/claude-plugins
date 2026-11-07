@@ -13,6 +13,7 @@ import sys
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PLUGIN_DIR, 'lib'))
 
+from prompt_text import is_system_only
 from state import State
 
 
@@ -26,7 +27,7 @@ def main() -> None:
     session_id = hook_input.get('session_id', '')
     prompt = hook_input.get('prompt', '')
 
-    if not session_id or not prompt:
+    if not session_id or not prompt or is_system_only(prompt):
         sys.exit(0)
 
     # --- 1. Record user prompt ---

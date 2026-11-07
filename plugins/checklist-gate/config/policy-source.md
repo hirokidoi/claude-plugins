@@ -29,6 +29,7 @@
 - **マッチキーワード**: `push`, `プッシュ`
 - **除外キーワード**: `dry-run`, `ドライラン`, `pushはまだ`, `pushはしないで`
 - **有効発話数**: 3
+- **自動通過の前提ゲート**: git_commit_gate
 - **ヒント**: 直近のユーザー発話に明示的な push 指示があった？「pushして」のような直接の依頼が無ければユーザーに確認して。
 
 ---
@@ -37,15 +38,15 @@
 
 ### task_start
 - **説明**: ファイル編集前に docs_checked を要求
-- **patterns**: `Edit(*)`, `Write(*)`, `Read(*)`, `Glob(*)`, `Grep(*)`
-- **except_patterns**: `Read(*README*)`, `Read(*DEVELOPMENT*)`, `Glob(*README*)`, `Glob(*DEVELOPMENT*)`
+- **patterns**: `Edit(*)`, `Write(*)`, `Read(*)`, `Glob(*)`, `Grep(*)`, `Bash(grep *)`, `Bash(rg *)`, `Bash(sed *)`, `Bash(cat *)`, `Bash(head *)`, `Bash(tail *)`, `Bash(less *)`
+- **except_patterns**: `Read(*README*)`, `Read(*DEVELOPMENT*)`, `Glob(*README*)`, `Glob(*DEVELOPMENT*)`, `Bash(*README*)`, `Bash(*DEVELOPMENT*)`
 - **要求 ack**: docs_checked
 - **有効**: はい
 
 ### git_commit_gate
 - **説明**: git commit 前に commit_ready を要求
 - **patterns**: `Bash(git commit *)`
-- **except_patterns**: なし
+- **except_patterns**: `Bash(git commit --dry-run *)`
 - **要求 ack**: commit_ready
 - **有効**: はい
 

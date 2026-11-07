@@ -24,6 +24,8 @@
 - `--prompt-id` で根拠となるユーザー発話の ID を必ず指定する
 - フックが発話原文を機械的に検証するため、エージェントが曖昧な発話を都合よく解釈して ack を通過することを防止できる
 - `user_authorized_push` は user-prompt-match 型のため、push のたびに ack が必要（consumable と同じ消費型）
+- 1 つの発話を根拠にできるのは 1 回まで。2 回目の push には、ユーザーの新しい指示が必要
+- 「commit して、push しないで」のように push が否定されている発話は、根拠にならない
 
 ---
 
@@ -82,6 +84,28 @@
 
 ---
 
+## シナリオ A-4: commit から push まで続けて依頼（自動通過）
+
+**状況**: ユーザーが「commit → push して」と依頼した。`user_authorized_push` に自動通過の前提ゲート（`git_commit_gate`）が設定されている。
+
+### フロー
+
+1. ユーザーが「commit → push して」と発話する（prompt_id=50 が通知される）
+2. Claude が commit のゲートの ack を揃えて `git commit` を実行し、git_commit_gate を通過する
+3. Claude が `git push` を実行しようとする
+4. フックが、prompt_id=50 に "push" が含まれ、その後に git_commit_gate を通過していることを確認する
+5. ack が自動で記録され、ゲートを通過する。`[checklist-gate: git_push_gate] user_authorized_push auto-authorized by prompt_id=50` が Claude に通知される
+
+### ポイント
+
+- 自動通過するのは、push の指示の後に commit を通過したときだけ。commit 済みの状態で「push して」とだけ依頼された場合は、シナリオ A のとおり deny → gate-ack になる
+- 1 つの発話で自動通過できるのは 1 回まで。同じ発話を根拠にもう一度 push しようとすると deny になる
+- 後から「push はやめて」のように否定すると、前の「push して」は根拠にならなくなる。push という語を含まない取り消し（「やっぱりやめて」など）は読み取れないので、取り消すときは push という語を入れる
+- `git commit --dry-run` は前提ゲートの除外に入っているので、commit の通過として扱われない
+- 開いているファイルのパスや貼り付けたテキストに push が含まれていても、根拠にはならない
+
+---
+
 ## シナリオ B: Claude が勝手に push しようとする
 
 **状況**: ユーザーからの明示的な push 指示がないまま、Claude が git push を試みる。
@@ -106,7 +130,7 @@
 
 ## シナリオ C: タスク開始時の docs 確認
 
-task_start ゲートは gate トリガーで動作する。patterns に指定されたツール（`Edit(*)`, `Write(*)`, `Read(*)`, `Glob(*)`, `Grep(*)`）を `docs_checked` の ack がなければブロックする。ただし except_patterns に該当する操作（`Read(*README*)`, `Read(*DEVELOPMENT*)`, `Glob(*README*)`, `Glob(*DEVELOPMENT*)`）は ack 前でも通す。
+task_start ゲートは gate トリガーで動作する。patterns に指定されたツール（Edit・Write・Read・Glob・Grep と、Bash の読み取り系コマンド）を `docs_checked` の ack がなければブロックする。ただし except_patterns に該当する操作（README・DEVELOPMENT を対象にしたもの）は ack 前でも通す。
 
 ### C-1: docs が存在する場合
 
@@ -127,7 +151,7 @@ task_start ゲートは gate トリガーで動作する。patterns に指定さ
 
 - `docs_checked` は session 型のため、セッション中に1回 ack すれば以降は不要
 - DEVELOPMENT.md が存在する場合はそちらも確認すること
-- README.md / DEVELOPMENT.md の Read・Glob は `except_patterns` により ack 不要で実行できる
+- README.md / DEVELOPMENT.md を対象にした Read・Glob・Bash（`cat README.md` など）は `except_patterns` により ack 不要で実行できる
 
 ### C-2: docs が存在しない場合
 

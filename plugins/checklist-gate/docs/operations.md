@@ -36,14 +36,22 @@ checklist-gate の設定は **Markdown 形式の設定書**（`$CLAUDE_PLUGIN_DA
 
 | 操作 | skill / コマンド | 説明 |
 |------|-----------------|------|
-| ゲートを無効にする | `checklist-gate:gate-off` skill または `gate-toggle off <ゲート名>` | 指定ゲートを OFF にする |
+| ゲートを無効にする | `checklist-gate:gate-off` skill または `gate-toggle off <ゲート名> --prompt-id <id>` | 指定ゲートを OFF にする |
 | ゲートを有効にする | `checklist-gate:gate-on` skill または `gate-toggle on <ゲート名>` | 指定ゲートを ON に戻す |
 | 現在の状態を確認する | `gate-toggle list` | 全ゲートの ON/OFF 状態を一覧表示する |
+
+### OFF にできる条件
+
+OFF は、ユーザーが外すよう頼んだときだけ受け付ける。Claude が自分の判断でゲートを外すことはできない。
+
+- `--prompt-id` で、外すよう頼んだユーザー発話を指定する
+- その発話が直近の数件以内にあり、「off」「オフ」「外して」「無効」などの語と、ゲート名か「ゲート」「gate」という語の両方を含み、否定されていない（「off にしないで」など）ときだけ OFF になる。例: 「git_push_gate を外して」「push のゲートを OFF にして」「gate-off」（skill 名は両方の語として扱う）
+- ON に戻すのに条件はない
 
 ### スコープ
 
 - トグルの有効範囲は **セッション単位**
-- セッションが終了すると、トグルの変更は自動的に消失し、次回セッションでは `policy.json` のデフォルト状態に戻る
+- 新しいセッションでは `policy.json` のデフォルト状態から始まる
 - トグルは `policy.json` のファイル自体を変更しない（ランタイムのみの一時的な上書き）
 
 ### gate-toggle list の出力例
@@ -67,7 +75,7 @@ checklist-gate の設定は **Markdown 形式の設定書**（`$CLAUDE_PLUGIN_DA
 1. 「gate-off」と伝える（または「ゲートを OFF にして」）
 2. 無効にしたいゲート名を指定する
 3. 作業を行う
-4. 作業後、必要に応じて「gate-on」で戻す（戻さなくてもセッション終了時に自動復帰する）
+4. 作業後、必要に応じて「gate-on」で戻す（戻さなくても、新しいセッションでは policy.json の状態から始まる）
 
 ### 新しい ack 項目を追加する
 

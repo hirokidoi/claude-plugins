@@ -21,7 +21,8 @@ If the user prompt is an affirmative response (e.g. OK, yes) to an AI question, 
   gate-ack user_authorized_push --prompt-id 42 --affirm "push しますか？" --reason "AIの質問に対しユーザーがOKと回答"
 
 Details of available gates and ack items: `gate-ack --help-gates`
-Temporarily toggle a gate on/off: `gate-toggle on <name>` / `gate-toggle off <name>`
+Temporarily toggle a gate on/off: `gate-toggle on <name>` / `gate-toggle off <name> --prompt-id <id>`
+Turning a gate off is accepted only when the cited user prompt asks for it (a word such as "off" / "外して" together with the gate name or the word "gate" / "ゲート"). Never turn a gate off on your own judgement.
 
 [checklist-gate data paths]
   policy-source.md: {plugin_data_dir}/policy-source.md
