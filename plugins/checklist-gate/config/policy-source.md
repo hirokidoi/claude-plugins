@@ -39,7 +39,7 @@
 ### task_start
 - **説明**: ファイル編集前に docs_checked を要求
 - **patterns**: `Edit(*)`, `Write(*)`, `Read(*)`, `Glob(*)`, `Grep(*)`, `Bash(grep *)`, `Bash(rg *)`, `Bash(sed *)`, `Bash(cat *)`, `Bash(head *)`, `Bash(tail *)`, `Bash(less *)`
-- **except_patterns**: `Read(*README*)`, `Read(*DEVELOPMENT*)`, `Glob(*README*)`, `Glob(*DEVELOPMENT*)`, `Bash(*README*)`, `Bash(*DEVELOPMENT*)`
+- **except_patterns**: `Read(*README*)`, `Read(*DEVELOPMENT*)`, `Read(*/.claude/*.md)`, `Glob(*README*)`, `Glob(*DEVELOPMENT*)`, `Bash(*README*)`, `Bash(*DEVELOPMENT*)`
 - **要求 ack**: docs_checked
 - **有効**: はい
 

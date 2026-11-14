@@ -31,7 +31,7 @@
           "Bash(grep *)", "Bash(rg *)", "Bash(sed *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(less *)"
         ],
         "except_patterns": [
-          "Read(*README*)", "Read(*DEVELOPMENT*)", "Glob(*README*)", "Glob(*DEVELOPMENT*)",
+          "Read(*README*)", "Read(*DEVELOPMENT*)", "Read(*/.claude/*.md)", "Glob(*README*)", "Glob(*DEVELOPMENT*)",
           "Bash(*README*)", "Bash(*DEVELOPMENT*)"
         ]
       },

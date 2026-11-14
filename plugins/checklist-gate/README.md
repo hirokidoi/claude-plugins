@@ -28,16 +28,6 @@ Claude Code 内で以下を実行:
 
 初回セットアップとして `checklist-gate:edit-config` → `checklist-gate:apply-config` skill で `policy.json` を生成してください。詳細は [はじめに](docs/getting-started.md) を参照。
 
-## 3.0.0 の変更点（アップデート前に確認）
-
-- **policy.json を読み込み時に検証する**: 未知のキー（`except_pattern` のような綴り違いを含む）を不正として扱う。独自のキーを書いている場合は、アップデート後に不正になる。不正の箇所はセッション開始時の知らせと deny のメッセージに表示される。不正の間は、読み取り専用のツールと apply-config による policy.json の書き込み以外がすべて止まる
-- **policy.json が無い間はゲートが開いたまま**: セッション開始時に未作成の知らせが出る
-- **パイプの後ろのコマンドも照合する**: 同梱の例の task_start は、docs_checked の前の `cat README.md | head` も止める。`git commit -m "$(cat <<'EOF' … EOF)"` の `cat` も同様
-- **大文字小文字を区別しない照合**: 除外パターンにも適用される
-- **Monitor は Bash の、NotebookEdit は Edit のパターンでも照合する**
-- **gate-ack・gate-toggle の未知のオプションはエラー**: `--session-id` の指定は不要で、付けるとエラーになる
-- **Python 3.9 以上で動く**
-
 ## ドキュメント
 
 - [はじめに（インストールとセットアップ）](docs/getting-started.md)
