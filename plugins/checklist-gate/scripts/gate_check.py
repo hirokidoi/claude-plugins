@@ -624,6 +624,8 @@ def _value_groups(tool_name: str, tool_input: dict) -> List[List[str]]:
     ]
     if isinstance(tool_input.get('pattern'), str):
         values.append(tool_input['pattern'])
+    if tool_name == 'Workflow' and isinstance(tool_input.get('name'), str):
+        values.append(tool_input['name'])
     return [values]
 
 

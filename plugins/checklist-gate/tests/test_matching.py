@@ -104,6 +104,21 @@ class TestToolNames(unittest.TestCase):
         self.assertFalse(applies(['Bash(git push *)'], 'Monitor', bash('echo "git push"')))
 
 
+class TestWorkflowName(unittest.TestCase):
+
+    def test_workflow_name_is_matched(self):
+        self.assertTrue(applies(['Workflow(sv-*)'], 'Workflow', {'name': 'sv-review-changes'}))
+        self.assertFalse(applies(['Workflow(sv-*)'], 'Workflow', {'name': 'other-flow'}))
+
+    def test_workflow_without_name_is_not_matched(self):
+        pattern = ['Workflow(*sv-*)']
+        self.assertFalse(applies(pattern, 'Workflow', {'script': 'export const meta = {name: "sv-x"}'}))
+        self.assertFalse(applies(pattern, 'Workflow', {'scriptPath': '/w/sv-review-changes.js'}))
+
+    def test_name_is_ignored_for_other_tools(self):
+        self.assertFalse(applies(['Skill(sv-*)'], 'Skill', {'skill': 'sv-x', 'name': 'sv-x'}))
+
+
 class TestExceptPerSimpleCommand(unittest.TestCase):
 
     def test_except_clears_only_its_own_command(self):

@@ -217,6 +217,7 @@ gate-ack <item> --prompt-id <id> --affirm "<AI の質問の引用>" --reason "<j
 - ツール名にも `*` を書ける（`mcp__*(*)` は MCP のツール全体）。`Tool(*)` や括弧なしの `Tool` は値を見ずに一致する
 - 末尾が ` *` のパターンは、引数なしにも一致する（`Bash(git push *)` は `git push` にも一致する）
 - Monitor は Bash のパターンで、NotebookEdit は Edit のパターン（対象は `notebook_path`）でも照合する。`Monitor(...)`・`NotebookEdit(...)` と直接書くこともできる。Edit のパターンは Write には効かない
+- Workflow は起動するワークフローの名前（`name`）を照合する（`Workflow(sv-*)` は名前が `sv-` で始まるワークフローに一致する）。スクリプトを直接渡す起動と、スクリプトのパスだけを渡す起動は名前を持たないので、`Workflow(*)` のような値を見ないパターンにしか一致しない
 - パターンの前後に空白があるもの、括弧の対応が取れないものは不正（検証で弾かれる）
 
 **Bash（と Monitor）の照合**
