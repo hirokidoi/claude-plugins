@@ -115,6 +115,38 @@ class TestSessionCheck(_StateTestBase):
         self.assertFalse(self.state.has_session_check('s1', 'other'))
 
 
+class TestResetSessionChecks(_StateTestBase):
+
+    def test_resets_only_the_given_items_and_gates_of_the_session(self) -> None:
+        for session_id in ('s1', 's2'):
+            for item in ('docs', 'sv', 'kept'):
+                self.state.add_session_check(session_id, item, 'ok')
+            for gate in ('task_start', 'other_gate'):
+                self.state.record_deny(session_id, gate)
+        self.state.reset_session_checks('s1', ['docs', 'sv'], ['task_start'])
+        self.assertFalse(self.state.has_session_check('s1', 'docs'))
+        self.assertFalse(self.state.has_session_check('s1', 'sv'))
+        self.assertTrue(self.state.has_session_check('s1', 'kept'))
+        self.assertFalse(self.state.has_deny('s1', 'task_start'))
+        self.assertTrue(self.state.has_deny('s1', 'other_gate'))
+        for item in ('docs', 'sv', 'kept'):
+            self.assertTrue(self.state.has_session_check('s2', item))
+        self.assertTrue(self.state.has_deny('s2', 'task_start'))
+
+    def test_returns_only_the_items_that_had_a_check(self) -> None:
+        self.state.add_session_check('s1', 'sv', 'ok')
+        self.state.add_session_check('s1', 'docs', 'ok')
+        self.assertEqual(
+            self.state.reset_session_checks('s1', ['docs', 'missing', 'sv'], []), ['docs', 'sv']
+        )
+        self.assertEqual(self.state.reset_session_checks('s1', ['docs'], []), [])
+
+    def test_leaves_consumable_acks_alone(self) -> None:
+        self._ack('s1', 'docs')
+        self.state.reset_session_checks('s1', ['docs'], [])
+        self.assertTrue(self.state.has_unconsumed_ack('s1', 'docs'))
+
+
 # ---- Ack operations ----
 
 

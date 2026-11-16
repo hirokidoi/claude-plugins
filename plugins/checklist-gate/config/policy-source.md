@@ -16,6 +16,7 @@
 ### docs_checked
 - **種類**: session（セッション中1回のみ）
 - **最低 reason 文字数**: 20
+- **取り消すきっかけ**: `compact`
 - **ヒント**: README.md や DEVELOPMENT.md を Read で全文読んだ？存在しない場合は Glob で探したが無かったことを reason に記載して。
 
 ### commit_ready

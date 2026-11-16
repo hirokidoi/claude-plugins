@@ -2,6 +2,8 @@
 
 {policy_notice}
 
+{reset_notice}
+
 This plugin enforces explicit ack declarations before specific operations (git push, git commit, etc).
 When blocked, follow the deny reason and run `gate-ack <item> --reason "<concrete justification>"` via Bash before retrying.
 The hook intercepts this command internally — no external binary is needed.

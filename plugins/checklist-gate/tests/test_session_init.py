@@ -4,8 +4,9 @@ import tempfile
 import unittest
 
 from tests.hook_harness import (
-    AGED_TIME, DB_NAME, SESSION_INIT, TABLES, example_policy, row_counts, run_hook, seed_all_rows,
-    seed_row, seed_session, write_policy,
+    AGED_TIME, DB_NAME, GATE_CHECK, SESSION_INIT, TABLES, assert_denied, assert_passed_silently,
+    example_policy, row_counts, run_hook, seed_all_rows, seed_row, seed_session, tool_call,
+    write_policy,
 )
 from state import State
 
@@ -104,6 +105,66 @@ class TestPolicyNotice(_InitCase):
 
     def test_context_tells_where_the_validation_script_is(self):
         self.assertIn('validate_policy.py', self.start().context)
+
+
+class TestResetOnStart(_InitCase):
+
+    def setUp(self):
+        super().setUp()
+        policy = example_policy()
+        policy['ack_items']['docs_checked']['reset_on'] = ['compact']
+        policy['ack_items']['other_check'] = {'type': 'session'}
+        os.makedirs(self.data_dir)
+        write_policy(self.data_dir, policy)
+        self.state = self.open_state()
+        for item in ('docs_checked', 'other_check'):
+            self.state.add_session_check('s1', item, 'read the docs')
+        self.state.record_deny('s1', 'task_start')
+        self.state.record_deny('s1', 'git_push_gate')
+
+    def start_from(self, source, session_id: str = 's1'):
+        hook_input = {'session_id': session_id, 'cwd': '/repo', 'source': source}
+        return run_hook(SESSION_INIT, hook_input, self.data_dir)
+
+    def test_listed_source_resets_the_item_and_the_deny_of_its_gate(self):
+        result = self.start_from('compact')
+        self.assertFalse(self.state.has_session_check('s1', 'docs_checked'))
+        self.assertFalse(self.state.has_deny('s1', 'task_start'))
+        self.assertIn('docs_checked', result.context)
+        self.assertIn('compact', result.context)
+        self.assertNotIn('systemMessage', result.output)
+
+    def test_gate_blocks_again_after_the_reset(self):
+        read = tool_call('Read', {'file_path': '/repo/src/a.py'}, session_id='s1')
+        assert_passed_silently(run_hook(GATE_CHECK, read, self.data_dir))
+        self.start_from('compact')
+        assert_denied(run_hook(GATE_CHECK, read, self.data_dir), 'docs_checked')
+
+    def test_items_and_gates_not_listed_are_kept(self):
+        self.start_from('compact')
+        self.assertTrue(self.state.has_session_check('s1', 'other_check'))
+        self.assertTrue(self.state.has_deny('s1', 'git_push_gate'))
+
+    def test_other_sources_reset_nothing(self):
+        for source in ('startup', 'resume', 'clear', None):
+            with self.subTest(source=source):
+                result = self.start_from(source)
+                self.assertTrue(self.state.has_session_check('s1', 'docs_checked'))
+                self.assertTrue(self.state.has_deny('s1', 'task_start'))
+                self.assertNotIn('取り消しました', result.context)
+
+    def test_other_sessions_are_not_reset(self):
+        self.start_from('compact', session_id='s2')
+        self.assertTrue(self.state.has_session_check('s1', 'docs_checked'))
+
+    def test_no_notice_when_the_item_was_not_acked(self):
+        self.start_from('compact')
+        self.assertNotIn('取り消しました', self.start_from('compact').context)
+
+    def test_invalid_policy_resets_nothing(self):
+        write_policy(self.data_dir, {'unknown_key': 1})
+        self.start_from('compact')
+        self.assertTrue(self.state.has_session_check('s1', 'docs_checked'))
 
 
 class TestWhenSomethingFails(_InitCase):

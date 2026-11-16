@@ -37,6 +37,12 @@ policy-source.md に「肯定応答キーワード」セクションがある場
 
 検証の規則は検証スクリプトが持つ。この文書には列挙しない。
 
+### policy-source.md → policy.json の変換ルール（session）
+
+| Markdown フィールド | policy.json フィールド | 変換ルール |
+|---|---|---|
+| 取り消すきっかけ | reset_on | バッククォートで囲まれたカンマ区切り → 文字列の配列。例: `` `compact`, `resume` `` → `["compact", "resume"]`。省略時はキー自体を出力しない |
+
 ### policy-source.md → policy.json の変換ルール（user-prompt-match）
 
 | Markdown フィールド | policy.json フィールド | 変換ルール |

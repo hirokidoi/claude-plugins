@@ -8,8 +8,8 @@ import unittest
 from tests.hook_harness import example_policy, gate_of, POLICY_EXAMPLE, USER_POLICY
 from policy import (
     ACK_TYPES, DEFAULT_MAX_PROMPT_DISTANCE, DEFAULT_MIN_REASON_LENGTH, DEFAULT_TYPE,
-    PolicyError, format_errors, gates_requiring, load_policy, MAX_LISTED_ERRORS, parse_policy,
-    parse_tool_pattern, validate,
+    PolicyError, format_errors, gates_requiring, items_reset_on, load_policy, MAX_LISTED_ERRORS,
+    parse_policy, parse_tool_pattern, RESET_SOURCES, validate,
 )
 
 
@@ -46,8 +46,18 @@ class TestDefaults(unittest.TestCase):
         policy = parse_policy(json.dumps({'ack_items': {'a': {}}}))
         self.assertEqual(
             policy['ack_items']['a'],
-            {'type': DEFAULT_TYPE, 'min_reason_length': DEFAULT_MIN_REASON_LENGTH, 'hint': ''},
+            {
+                'type': DEFAULT_TYPE, 'min_reason_length': DEFAULT_MIN_REASON_LENGTH, 'hint': '',
+                'reset_on': [],
+            },
         )
+
+    def test_reset_on_default_is_only_for_session_items(self):
+        policy = parse_policy(json.dumps({'ack_items': {
+            'a': {'type': 'session'}, 'b': {'type': 'consumable'},
+        }}))
+        self.assertEqual(policy['ack_items']['a']['reset_on'], [])
+        self.assertNotIn('reset_on', policy['ack_items']['b'])
 
     def test_prompt_match_item_defaults(self):
         policy = parse_policy(json.dumps(
@@ -133,6 +143,34 @@ class TestInvalidPolicies(unittest.TestCase):
             broken(lambda p: p['ack_items']['docs_checked'].update(type='sticky')),
             'ack_items.docs_checked.type',
         )
+
+    def test_reset_on_accepts_only_sources_that_keep_the_session(self):
+        self.assertEqual(
+            broken(lambda p: p['ack_items']['docs_checked'].update(reset_on=list(RESET_SOURCES))),
+            [],
+        )
+        for value in (['startup'], ['clear'], ['fork'], ['compact', 'Compact'], [1]):
+            with self.subTest(value=value):
+                self.assertReports(
+                    broken(lambda p: p['ack_items']['docs_checked'].update(reset_on=value)),
+                    'ack_items.docs_checked.reset_on[',
+                )
+
+    def test_reset_on_must_be_a_non_empty_array(self):
+        for value in ([], 'compact', None):
+            with self.subTest(value=value):
+                self.assertReports(
+                    broken(lambda p: p['ack_items']['docs_checked'].update(reset_on=value)),
+                    'ack_items.docs_checked.reset_on',
+                )
+
+    def test_reset_on_is_only_for_session_items(self):
+        for item in ('commit_ready', 'user_authorized_push'):
+            with self.subTest(item=item):
+                self.assertReports(
+                    broken(lambda p: p['ack_items'][item].update(reset_on=['compact'])),
+                    f'ack_items.{item}.reset_on', 'only valid for type session',
+                )
 
     def test_gate_without_name_or_trigger(self):
         self.assertReports(broken(lambda p: gate_of(p, 'task_start').pop('name')), 'name')
@@ -282,6 +320,15 @@ class TestHelpers(unittest.TestCase):
         policy = parse_policy(json.dumps(example_policy()))
         self.assertEqual(gates_requiring(policy, 'user_authorized_push'), ['git_push_gate'])
         self.assertEqual(gates_requiring(policy, 'unknown'), [])
+
+    def test_items_reset_on(self):
+        raw = example_policy()
+        raw['ack_items']['docs_checked']['reset_on'] = ['compact']
+        raw['ack_items']['other_check'] = {'type': 'session', 'reset_on': ['compact', 'resume']}
+        policy = parse_policy(json.dumps(raw))
+        self.assertEqual(items_reset_on(policy, 'compact'), ['docs_checked', 'other_check'])
+        self.assertEqual(items_reset_on(policy, 'resume'), ['other_check'])
+        self.assertEqual(items_reset_on(policy, 'startup'), [])
 
     def test_format_errors_truncates(self):
         errors = [f'e{i}' for i in range(MAX_LISTED_ERRORS + 3)]

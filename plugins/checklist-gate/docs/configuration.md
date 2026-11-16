@@ -57,9 +57,52 @@ policy.json は以下のセクションで構成されます。
 
 ### type の違い
 
-- **session** -- 一度 ack を宣言すると、そのセッション中は再宣言不要。例: ドキュメント確認（`docs_checked`）
+- **session** -- 一度 ack を宣言すると、そのセッション中は再宣言不要。会話の要約の後などに取り消すこともできる（reset_on）。例: ドキュメント確認（`docs_checked`）
 - **consumable** -- 操作のたびに ack が消費される。例: コミット準備（`commit_ready`）
 - **user-prompt-match** -- エージェントの自己申告ではなく、ユーザーの発話原文を機械的に検証する ack。`--prompt-id` で根拠となる発話 ID を指定する。consumable と同様に操作のたびに消費される。例: push 許可（`user_authorized_push`）
+
+### session 固有フィールド（reset_on）
+
+session 型の ack は、通常はセッションが終わるまで有効です。`reset_on` を書くと、指定したきっかけでセッションが始まり直したときに、その ack を取り消します。会話が要約された後に、ドキュメントを読み直させたい場合などに使います。
+
+| フィールド | 説明 |
+|---|---|
+| reset_on | ack を取り消すきっかけの配列。省略時は取り消さない（セッションが終わるまで有効） |
+
+書けるきっかけは次の 2 つです。
+
+| きっかけ | 起きるとき |
+|---|---|
+| `compact` | 会話が要約された後 |
+| `resume` | 中断したセッションを再開したとき |
+
+- 書けるのは、同じ session_id のまま続くきっかけだけ。新規の起動・`/clear`・分岐（fork）では新しいセッションになり、ack はもともと引き継がれないため、書くと不正になる（検証で弾かれる）
+- session 型の項目にだけ書ける。consumable・user-prompt-match の項目に書くと不正になる。空の配列も不正
+- 取り消すのは、その項目の ack と、その項目を要求するゲートに残っている deny の記録。deny も消すので、取り消しの後は改めて deny を受けてから ack する（deny-first）。他の項目の ack、発話の記録、ゲートのトグルには触れない
+- 取り消したときは、セッションの開始時の additionalContext で、取り消した項目を Claude に知らせる。ack していなかった項目は知らせに載らない
+
+`policy-source.md` では「取り消すきっかけ」と記述します。
+
+```
+### docs_checked
+- **種類**: session（セッション中1回のみ）
+- **最低 reason 文字数**: 20
+- **取り消すきっかけ**: `compact`
+- **ヒント**: README.md や DEVELOPMENT.md を Read で全文読んだ？
+```
+
+対応する policy.json:
+
+```json
+"docs_checked": {
+  "type": "session",
+  "min_reason_length": 20,
+  "reset_on": ["compact"],
+  "hint": "README.md や DEVELOPMENT.md を Read で全文読んだ？"
+}
+```
+
+日をまたいでセッションを再開したときにも読み直させたい場合は、`` `compact`, `resume` `` のように並べます。要約の後の流れは [シナリオ集](scenarios.md) の C-4 を参照してください。
 
 ### user-prompt-match 固有フィールド
 

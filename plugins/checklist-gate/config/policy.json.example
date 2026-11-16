@@ -4,6 +4,7 @@
     "docs_checked": {
       "type": "session",
       "min_reason_length": 20,
+      "reset_on": ["compact"],
       "hint": "README.md や DEVELOPMENT.md を Read で全文読んだ？存在しない場合は Glob で探したが無かったことを reason に記載して。"
     },
     "commit_ready": {

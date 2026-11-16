@@ -10,12 +10,14 @@ ACK_TYPES = ('session', 'consumable', 'user-prompt-match')
 DEFAULT_TYPE = 'session'
 DEFAULT_MIN_REASON_LENGTH = 20
 DEFAULT_MAX_PROMPT_DISTANCE = 3
+# SessionStart sources that keep the session_id; the others start a new session.
+RESET_SOURCES = ('compact', 'resume')
 
 MAX_LISTED_ERRORS = 10
 
 _TOP_KEYS = ('affirm_keywords', 'ack_items', 'gates')
 _ACK_KEYS = (
-    'type', 'min_reason_length', 'hint', 'match_keywords', 'except_keywords',
+    'type', 'min_reason_length', 'hint', 'reset_on', 'match_keywords', 'except_keywords',
     'max_prompt_distance', 'auto_authorize_after_gate',
 )
 _PROMPT_MATCH_ONLY_KEYS = (
@@ -108,6 +110,21 @@ def _check_patterns(value: Any, where: str, errors: List[str], allow_empty: bool
             errors.append(f'{loc} "{pattern}": {e}')
 
 
+def _check_reset_on(value: Any, item_type: Any, where: str, errors: List[str]) -> None:
+    if item_type != 'session':
+        if item_type in ACK_TYPES:
+            errors.append(f'{where}: only valid for type session')
+        return
+    if not isinstance(value, list):
+        errors.append(f'{where}: must be an array')
+        return
+    if not value:
+        errors.append(f'{where}: must not be empty')
+    for i, source in enumerate(value):
+        if source not in RESET_SOURCES:
+            errors.append(f'{where}[{i}]: must be one of {", ".join(RESET_SOURCES)}')
+
+
 def _validate_ack_item(name: str, cfg: Any, gate_names: set, errors: List[str]) -> None:
     where = f'ack_items.{name}'
     if not isinstance(cfg, dict):
@@ -123,6 +140,8 @@ def _validate_ack_item(name: str, cfg: Any, gate_names: set, errors: List[str]) 
             errors.append(f'{where}.min_reason_length: must be an integer >= 0')
     if 'hint' in cfg and not isinstance(cfg['hint'], str):
         errors.append(f'{where}.hint: must be a string')
+    if 'reset_on' in cfg:
+        _check_reset_on(cfg['reset_on'], item_type, f'{where}.reset_on', errors)
     if item_type != 'user-prompt-match':
         for key in _PROMPT_MATCH_ONLY_KEYS:
             if key in cfg:
@@ -235,6 +254,8 @@ def _with_defaults(raw: dict) -> dict:
         cfg.setdefault('type', DEFAULT_TYPE)
         cfg.setdefault('min_reason_length', DEFAULT_MIN_REASON_LENGTH)
         cfg.setdefault('hint', '')
+        if cfg['type'] == 'session':
+            cfg.setdefault('reset_on', [])
         if cfg['type'] == 'user-prompt-match':
             cfg.setdefault('except_keywords', [])
             cfg.setdefault('max_prompt_distance', DEFAULT_MAX_PROMPT_DISTANCE)
@@ -276,3 +297,11 @@ def load_policy(path: str) -> Optional[dict]:
 def gates_requiring(policy: dict, item: str) -> List[str]:
     """Names of the gates that list item in require."""
     return [g['name'] for g in policy.get('gates', []) if item in g.get('require', [])]
+
+
+def items_reset_on(policy: dict, source: str) -> List[str]:
+    """Names of the session ack items whose reset_on lists source."""
+    return [
+        name for name, cfg in policy.get('ack_items', {}).items()
+        if source in cfg.get('reset_on', [])
+    ]

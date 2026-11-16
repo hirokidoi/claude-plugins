@@ -261,6 +261,28 @@ class State:
         ).fetchone()
         return row is not None
 
+    def reset_session_checks(
+        self, session_id: str, items: List[str], gate_names: List[str]
+    ) -> List[str]:
+        """Delete the session checks of items and the denies of gate_names in one write lock.
+
+        Returns the items that had a check, in the order given."""
+        with self.transaction() as conn:
+            existing = {
+                row['item'] for row in conn.execute(
+                    'SELECT item FROM session_checks WHERE session_id = ?', (session_id,)
+                ).fetchall()
+            }
+            conn.executemany(
+                'DELETE FROM session_checks WHERE session_id = ? AND item = ?',
+                [(session_id, item) for item in items],
+            )
+            conn.executemany(
+                'DELETE FROM gate_denies WHERE session_id = ? AND gate_name = ?',
+                [(session_id, name) for name in gate_names],
+            )
+        return [item for item in items if item in existing]
+
     # --- Ack operations (consumable ack) ---
 
     def add_ack_if_allowed(

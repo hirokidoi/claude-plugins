@@ -179,7 +179,7 @@ PreToolUse のフックには、起動の失敗・時間切れ・想定外の終
 
 ### セッション再開時の挙動
 
-- **session 型の ack**（例: `docs_checked`） -- セッション中は維持される。新しいセッションでは再度 ack が必要
+- **session 型の ack**（例: `docs_checked`） -- セッション中は維持される。新しいセッションでは再度 ack が必要。取り消すきっかけ（reset_on）に `resume` を書いた項目は、再開で取り消される（`compact` なら会話の要約の後）
 - **consumable 型の ack**（例: `commit_ready`） -- 使用（消費）済みの ack は再利用できない。同じ操作を再度行う場合は、新たに ack を宣言する必要がある
 - **user-prompt-match 型の ack**（例: `user_authorized_push`） -- consumable と同様に消費型。加えて、ユーザー発話の prompt_id によるキーワード検証が毎回行われる
 - **ランタイムトグル** -- 同じセッションの再開では持ち越される。`/clear` や新しいセッションでは policy.json の状態から開始される

@@ -150,7 +150,7 @@ task_start ゲートは gate トリガーで動作する。patterns に指定さ
 
 #### ポイント
 
-- `docs_checked` は session 型のため、セッション中に1回 ack すれば以降は不要
+- `docs_checked` は session 型のため、セッション中に1回 ack すれば以降は不要。ただし、取り消すきっかけを設定していれば、会話の要約の後などにやり直しになる（C-4）
 - DEVELOPMENT.md が存在する場合はそちらも確認すること
 - README.md / DEVELOPMENT.md を対象にした Read・Glob・Bash（`cat README.md` など）は `except_patterns` により ack 不要で実行できる
 - Bash はパイプの後ろや `$(…)` の中のコマンドも別々に判定される。`cat README.md | head` は `cat README.md` が除外に当たっても、`head` が除外に当たらないためゲートがかかる。コミットメッセージを `$(cat <<'EOF' … EOF)` で渡す場合も、中の `cat` にゲートがかかる
@@ -193,6 +193,28 @@ task_start ゲートは gate トリガーで動作する。patterns に指定さ
 
 - `except_patterns` は README.md / DEVELOPMENT.md に限定されているため、それ以外のファイルへのアクセスはブロック対象
 - ack の reason には「なぜ通常の docs 確認ではなく別ドキュメントを参照するのか」を明記する
+
+### C-4: 会話が要約された後の読み直し
+
+**状況**: 長い作業の途中で会話が要約された。要約では読んだドキュメントの中身が失われるが、`docs_checked` の ack はセッション単位なので残っている。`docs_checked` に「取り消すきっかけ: `compact`」を設定してある（設定方法は [設定リファレンス](configuration.md) の「session 固有フィールド」を参照）。
+
+#### フロー
+
+1. 会話が要約される
+2. **SessionStart hook** が `compact` をきっかけに `docs_checked` の ack を取り消し、task_start に残っている deny の記録も消す
+3. 同じ hook が、`docs_checked` を取り消したことを additionalContext で Claude に知らせる
+4. Claude がファイルを編集しようとすると、**task_start ゲートが deny** を返す
+5. Claude が README.md などを読み直してから、改めて ack を宣言する:
+   ```
+   gate-ack docs_checked --reason "要約の後に README.md と DEVELOPMENT.md を Read で読み直した"
+   ```
+6. ファイル編集がゲートを通過する
+
+#### ポイント
+
+- 取り消されるのは「取り消すきっかけ」を設定した項目だけ。他の ack・発話の記録・ゲートのトグルはそのまま残る
+- 新規の起動と `/clear` は新しいセッションになるので、設定しなくても ack は最初から無い
+- セッションを再開したとき（`resume`）にも読み直させたい場合は、きっかけに `resume` も並べる
 
 ---
 

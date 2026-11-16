@@ -14,7 +14,8 @@ SessionStart hook
   v
 session_init.py  --->  データディレクトリ作成・policy-source.md の複製
   |               --->  State (SQLite)  --- セッションの最終使用時刻の更新 / 古いデータの掃除
-  |               --->  policy.json の状態（未作成・不正）を知らせに載せる
+  |                                         / 開始の理由が reset_on に当たる session ack の取り消し
+  |               --->  policy.json の状態（未作成・不正）と取り消した ack を知らせに載せる
   |
   v
 [ユーザーが発話]
@@ -77,7 +78,7 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 
 ### 典型的なフロー
 
-1. **SessionStart**: セッション開始時（再開・`/clear`・compact を含む）に session_init.py がセッションの最終使用時刻を更新し、古いデータを掃除し、policy.json の状態を知らせる
+1. **SessionStart**: セッション開始時（再開・`/clear`・compact を含む）に session_init.py がセッションの最終使用時刻を更新し、古いデータを掃除し、開始の理由が reset_on に当たる session ack を取り消し、policy.json の状態と取り消した ack を知らせる
 2. **UserPromptSubmit**: ユーザーの発話ごとに prompt_store.py が発話を DB に記録し、prompt_id をエージェントに通知する
 3. **PreToolUse**: ツール使用時に gate_check.py がポリシーに基づいてゲート判定を行う
 4. **deny**: ゲート条件未充足の場合、deny レスポンスを返却し、gate_denies テーブルに deny を記録する
@@ -110,7 +111,7 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 | ファイル | 責務 |
 |---|---|
 | hooks/hooks.json | フックイベント（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse）と実行するスクリプトの対応定義。`$CLAUDE_PLUGIN_ROOT` 環境変数を使って scripts/ 配下の Python スクリプトを直接呼び出す |
-| scripts/session_init.py | データディレクトリの用意、セッションの最終使用時刻の更新、スキーマ初期化、古いデータの掃除、policy.json の状態の知らせ、セッションコンテキストの出力。DB の各段は個別に失敗を受け止め、出力までは必ず進む |
+| scripts/session_init.py | データディレクトリの用意、セッションの最終使用時刻の更新、スキーマ初期化、古いデータの掃除、開始の理由による session ack の取り消し、policy.json の状態と取り消しの知らせ、セッションコンテキストの出力。DB の各段は個別に失敗を受け止め、出力までは必ず進む |
 | scripts/prompt_store.py | UserPromptSubmit hook スクリプト。ユーザー発話を DB に記録し、additionalContext で prompt_id をエージェントに通知 |
 | scripts/gate_check.py | PreToolUse 時のゲート判定、deny/allow の決定、異常時に止める判断、policy.json の書き込みの保護、deny-first の enforce、user-prompt-match の発話検証、gate-ack / gate-toggle コマンドの内部処理（検証、ack と off の保留、on のトグル操作）、天の声ゲートの per-turn additionalContext 注入、絶対に止めるゲートの deny |
 | scripts/confirm_run.py | PostToolUse hook スクリプト。呼び出しの保留を取り出して確定する。記録できなかった ack は additionalContext で知らせる。失敗しても出力せず終了コード 0 |
@@ -120,7 +121,7 @@ gate_check.py が検出 → deny-first チェック → 未消費の ack が無�
 | lib/state.py | SQLite DAO 層。テーブルの操作、スキーマ初期化と列の追加、トランザクション管理、掃除。DB は `$CLAUDE_PLUGIN_DATA/checklist-gate.sqlite` に配置 |
 | lib/prompt_text.py | 発話のうちユーザーが書いた部分の抽出と、システムの通知だけの発話の判定。prompt_store.py と gate_check.py が使う |
 | config/policy.json.example | ゲートルールと ack 項目のスキーマリファレンス。apply-config skill がこのファイルを参照して `$CLAUDE_PLUGIN_DATA/policy.json` を生成する |
-| templates/ | deny 理由やセッションコンテキストのテンプレートファイル。deny-reason.txt は `{gate_name}`, `{require_list}`, `{ack_commands}`, `{ack_hint}`, `{exit_section}`, `{prompt_match_section}` を使用。`{exit_section}` は deny-exit.txt（変数 `{exit_commands}`。user-prompt-match 以外の不足項目があるときだけ出す）、`{prompt_match_section}` は deny-prompt-match.txt（不足項目に user-prompt-match があるときだけ出す）。session-context.txt は `{plugin_data_dir}`, `{plugin_root}`, `{policy_notice}` を使用（session_init.py が置換） |
+| templates/ | deny 理由やセッションコンテキストのテンプレートファイル。deny-reason.txt は `{gate_name}`, `{require_list}`, `{ack_commands}`, `{ack_hint}`, `{exit_section}`, `{prompt_match_section}` を使用。`{exit_section}` は deny-exit.txt（変数 `{exit_commands}`。user-prompt-match 以外の不足項目があるときだけ出す）、`{prompt_match_section}` は deny-prompt-match.txt（不足項目に user-prompt-match があるときだけ出す）。session-context.txt は `{plugin_data_dir}`, `{plugin_root}`, `{policy_notice}`, `{reset_notice}` を使用（session_init.py が置換） |
 | config/policy-source.md | ゲートルールと ack 項目のデフォルトテンプレート（Markdown 形式）。初回セッション時に `$CLAUDE_PLUGIN_DATA` にコピーされ、ユーザーはコピー先を編集する。apply-config skill で policy.json に変換する |
 | skills/ | Claude Code の skill 定義。apply-config（設定反映）、edit-config（設定編集）、gate-on / gate-off（ゲートの有効/無効切り替え）を提供 |
 | docs/ | ユーザー向けドキュメント（導入手順、設定ガイド、運用ガイド、シナリオ例、監査・トラブルシューティング）と、この開発者向け文書 |
@@ -172,6 +173,16 @@ PreToolUse フックが通した呼び出しでも、その後に別のフック
 
 Claude Code はプラグインの hook 実行時に `$CLAUDE_PLUGIN_ROOT` 環境変数をプラグインのインストール先ディレクトリに設定する。hooks.json ではこの変数を使って scripts/ 配下の Python スクリプトを直接呼び出す。
 
+#### 開始の理由による session ack の取り消し
+
+session ack は session_id ごとに残る。会話の要約（compact）と再開（resume）は同じ session_id のまま続くので、要約で読んだ内容が失われても ack は残る。reset_on は、SessionStart の入力の `source` がこれに当たるとき、指定した項目の ack を取り消すためのもの。
+
+- 書ける値は同じ session_id のまま続くきっかけだけ（`RESET_SOURCES`）。新規の起動・`/clear`・fork は新しい session_id で始まり、取り消す対象が無いので、書くと不正にする
+- 取り消しは、項目の ack と、その項目を要求するゲートの deny の記録を、1 つの書き込みロックの中で消す（`State.reset_session_checks`）。deny を残すと、要約で deny の文面を失った後に、新しい deny を経ずに ack できてしまうため
+- 消すのは取り消しの対象だけ。発話の記録・トグル・consumable の ack・自動通過の記録には触れない
+- policy.json が無い・不正なときは取り消さない。取り消しに失敗しても、他の段と同じく出力までは進む（ack が残る = 取り消す前と同じ状態）
+- 取り消した項目は additionalContext で知らせる。ack が無かった項目は載せない
+
 #### $CLAUDE_PLUGIN_DATA（永続データディレクトリ）
 
 Claude Code はプラグインの hook 実行時に `$CLAUDE_PLUGIN_DATA` 環境変数をプラグイン固有の永続データディレクトリに設定する。`$CLAUDE_PLUGIN_ROOT`（コードディレクトリ）はプラグイン更新時に上書きされるため、ユーザーデータ（policy.json, policy-source.md, SQLite DB）は `$CLAUDE_PLUGIN_DATA` に配置する。
@@ -220,6 +231,7 @@ policy.json への Edit/Write の保護は、policy の設定ではなくフッ�
 
 - policy-source.md の ack 項目セクションに定義を追加し、apply-config skill で policy.json に反映する（type, min_reason_length, hint を指定。省略したものは既定値が補われる）
 - type は session（セッション中1回で永続）、consumable（使い捨て）、または user-prompt-match（ユーザー発話検証付き使い捨て）を選択
+- session タイプの場合は reset_on（取り消すきっかけ）を指定できる
 - user-prompt-match タイプの場合は match_keywords（必須）, except_keywords, max_prompt_distance, auto_authorize_after_gate を指定する
 - 対応するゲートの require 配列に項目名を追加する
 - 項目のキーを増やすときは、lib/policy.py の検証と既定値の補完にも足す（未知のキーは不正になる）
@@ -401,7 +413,7 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
 
 | ファイル | 対象 |
 |---|---|
-| test_state.py | State の操作（セッション・ack・発話・deny・トグル・掃除・トランザクション）。掃除は表ごと |
+| test_state.py | State の操作（セッション・ack・発話・deny・トグル・掃除・トランザクション・session ack の取り消し）。掃除は表ごと |
 | test_shell_parse.py | `command_forms` を、包み・置換・引用符・ヒアドキュメント・コメント・行継続・解析の失敗の表で判定する純粋関数のテスト |
 | test_matching.py | 大文字小文字、パスの正規化、`[ ]` `?` が文字どおりであること、ツール名のワイルドカード、Monitor・NotebookEdit の別名、Workflow の名前の照合、末尾 ` *` の扱い、除外が単純コマンドごとであること |
 | test_policy.py | 検証規則（同梱の例が通ること、不正の各種）と既定値の補完 |
@@ -409,7 +421,7 @@ ack の消費は、全ゲートの判定が終わってから、1 つの書き�
 | test_fail_closed.py | policy.json の不正・未作成、DB の破損、stdin の不正で、止める・通すが設計どおりであること。Python 3.9 互換（構文と注釈の確認） |
 | test_policy_protection.py | policy.json への Edit/Write が、発話の条件と内容の検証で通る・止まること |
 | test_deny_message.py | deny のメッセージの節が、不足項目の種類で出し分けられること |
-| test_session_init.py | データディレクトリの作成、policy.json の状態の知らせ、掃除（最終使用時刻と孤立した行） |
+| test_session_init.py | データディレクトリの作成、policy.json の状態の知らせ、掃除（最終使用時刻と孤立した行）、開始の理由による session ack と deny の取り消しと知らせ、取り消しの後にゲートが再び止めること |
 | test_prompt_store.py | システムの通知だけの発話を記録しないこと、閉じていないタグを含むユーザーの発話が記録されること、最終使用時刻の更新 |
 | test_gate_commands.py | gate-ack・gate-toggle の拒否と受理（deny-first、最低文字数、発話の範囲、未知のオプション、`--affirm`）をフックを通して確かめる |
 | test_gate_check_affirm.py | `--affirm` のロジックと、キーワードの照合（単語・正規化・IDE や貼り付けのブロックの除外） |
